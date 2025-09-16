@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 import logging
+import os
 from telegram import Bot
 from telegram.error import TelegramError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -8,8 +9,8 @@ from collections import Counter
 import uuid
 
 # Configurações do Bot
-BOT_TOKEN = "7758723414:AAF-Zq1QPoGy2IS-iK2Wh28PfexP0_mmHHc"
-CHAT_ID = "--1002506692600"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "7758723414:AAF-Zq1QPoGy2IS-iK2Wh28PfexP0_mmHHc")
+CHAT_ID = os.getenv("CHAT_ID", "--1002506692600")
 API_URL = "https://api.casinoscores.com/svc-evolution-game-events/api/bacbo/latest"
 
 # Inicializar o bot
@@ -328,8 +329,6 @@ async def main():
     global historico, ultimo_padrao_id, ultimo_resultado_id, rodadas_desde_erro, detecao_pausada
     asyncio.create_task(enviar_relatorio())
     asyncio.create_task(enviar_monitoramento())
-    # Mensagem de teste para verificar se o bot está funcionando
-    await bot.send_message(chat_id=CHAT_ID, text="🚀 Bot iniciado com sucesso!")
 
     while True:
         try:
