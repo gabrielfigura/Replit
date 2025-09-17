@@ -1,16 +1,15 @@
 import asyncio
 import aiohttp
 import logging
-import os
 from telegram import Bot
 from telegram.error import TelegramError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from collections import Counter
 import uuid
 
-# Configurações do Bot
-BOT_TOKEN = os.getenv("BOT_TOKEN", "7758723414:AAF-Zq1QPoGy2IS-iK2Wh28PfexP0_mmHHc")
-CHAT_ID = os.getenv("CHAT_ID", "--1002506692600")
+# Configurações do Bot (valores fixos para teste)
+BOT_TOKEN = "7758723414:AAF-Zq1QPoGy2IS-iK2Wh28PfexP0_mmHHc"
+CHAT_ID = "--1002506692600"
 API_URL = "https://api.casinoscores.com/svc-evolution-game-events/api/bacbo/latest"
 
 # Inicializar o bot
@@ -70,23 +69,26 @@ PADROES = [
     {"id": 390, "sequencia": ["🔵", "🔵", "🔴", "🔴", "🔴", "🔵", "🔵"], "sinal": "🔴"}
 ]
 
-@retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=30), retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)))
+@retry(stop=stop_after_attempt(7), wait=wait_exponential(multiplier=1, min=4, max=60), retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)))
 async def fetch_resultado():
     """Busca o resultado mais recente da API com retry e timeout aumentado."""
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(API_URL, timeout=aiohttp.ClientTimeout(total=15)) as response:
+            async with session.get(API_URL, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status != 200:
                     logging.error(f"Erro na API: Status {response.status}, Resposta: {await response.text()}")
+                    await enviar_erro_telegram(f"Erro na API: Status {response.status}, Resposta: {await response.text()}")
                     return None, None, None, None
                 data = await response.json()
                 logging.debug(f"Resposta da API: {data}")
                 
                 if 'data' not in data or 'result' not in data['data'] or 'outcome' not in data['data']['result']:
                     logging.error(f"Estrutura inválida na resposta: {data}")
+                    await enviar_erro_telegram(f"Estrutura inválida na resposta: {data}")
                     return None, None, None, None
                 if 'id' not in data:
                     logging.error(f"Chave 'id' não encontrada na resposta: {data}")
+                    await enviar_erro_telegram(f"Chave 'id' não encontrada: {data}")
                     return None, None, None, None
                 
                 if data['data'].get('status') != 'Resolved':
@@ -100,18 +102,22 @@ async def fetch_resultado():
                 
                 if outcome not in OUTCOME_MAP:
                     logging.error(f"Outcome inválido: {outcome}")
+                    await enviar_erro_telegram(f"Outcome inválido: {outcome}")
                     return None, None, None, None
                 resultado = OUTCOME_MAP[outcome]
                 
                 return resultado, resultado_id, player_score, banker_score
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logging.error(f"Erro de conexão com a API: {e}")
+            await enviar_erro_telegram(f"Erro de conexão com a API: {e}")
             return None, None, None, None
         except ValueError as e:
             logging.error(f"Erro ao parsear JSON: {e}")
+            await enviar_erro_telegram(f"Erro ao parsear JSON: {e}")
             return None, None, None, None
         except Exception as e:
             logging.error(f"Erro inesperado ao buscar resultado: {e}")
+            await enviar_erro_telegram(f"Erro inesperado: {e}")
             return None, None, None, None
 
 def verificar_tendencia(historico, sinal, tamanho_janela=8):
@@ -165,6 +171,7 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia):
         return message.message_id
     except TelegramError as e:
         logging.error(f"Erro ao enviar sinal: {e}")
+        await enviar_erro_telegram(f"Erro ao enviar sinal: {e}")
         raise
 
 async def enviar_placar():
@@ -186,6 +193,7 @@ Precisão: {precisao:.2f}%"""
         logging.info(f"Placar enviado: {mensagem_placar}")
     except TelegramError as e:
         logging.error(f"Erro ao enviar placar: {e}")
+        await enviar_erro_telegram(f"Erro ao enviar placar: {e}")
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(TelegramError))
 async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
@@ -275,6 +283,7 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                 detecao_pausada = False  # Retomar detecção se sinal obsoleto
     except TelegramError as e:
         logging.error(f"Erro ao enviar resultado: {e}")
+        await enviar_erro_telegram(f"Erro ao enviar resultado: {e}")
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(TelegramError))
 async def enviar_monitoramento():
@@ -299,6 +308,7 @@ async def enviar_monitoramento():
                 logging.debug("Monitoramento pausado: Sinal ativo pendente")
         except TelegramError as e:
             logging.error(f"Erro ao enviar monitoramento: {e}")
+            await enviar_erro_telegram(f"Erro ao enviar monitoramento: {e}")
         await asyncio.sleep(15)
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(TelegramError))
@@ -322,13 +332,30 @@ Precisão: {precisao:.2f}%"""
             logging.info(f"Relatório enviado: {msg}")
         except TelegramError as e:
             logging.error(f"Erro ao enviar relatório: {e}")
+            await enviar_erro_telegram(f"Erro ao enviar relatório: {e}")
         await asyncio.sleep(3600)
+
+async def enviar_erro_telegram(erro_msg):
+    """Envia uma notificação de erro para o Telegram."""
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text=f"❌ Erro detectado: {erro_msg}")
+        logging.info(f"Notificação de erro enviada: {erro_msg}")
+    except TelegramError as e:
+        logging.error(f"Erro ao enviar notificação: {e}")
 
 async def main():
     """Loop principal do bot com reconexão."""
     global historico, ultimo_padrao_id, ultimo_resultado_id, rodadas_desde_erro, detecao_pausada
     asyncio.create_task(enviar_relatorio())
     asyncio.create_task(enviar_monitoramento())
+
+    # Mensagem de teste para verificar se o bot está funcionando
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text="🚀 Bot iniciado com sucesso!")
+        logging.info("Mensagem de teste enviada com sucesso")
+    except TelegramError as e:
+        logging.error(f"Erro ao enviar mensagem de teste: {e}")
+        await enviar_erro_telegram(f"Erro ao iniciar bot: {e}")
 
     while True:
         try:
@@ -379,6 +406,7 @@ async def main():
             await asyncio.sleep(2)
         except Exception as e:
             logging.error(f"Erro no loop principal: {e}")
+            await enviar_erro_telegram(f"Erro no loop principal: {e}")
             await asyncio.sleep(10)
 
 if __name__ == "__main__":
@@ -388,3 +416,4 @@ if __name__ == "__main__":
         logging.info("Bot encerrado pelo usuário")
     except Exception as e:
         logging.error(f"Erro fatal no bot: {e}")
+        asyncio.run(enviar_erro_telegram(f"Erro fatal no bot: {e}"))
