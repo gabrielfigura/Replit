@@ -143,15 +143,16 @@ async def enviar_placar():
         total_sinais = total_acertos + placar['losses']
         precisao = (total_acertos / total_sinais * 100) if total_sinais > 0 else 0.0
         precisao = min(precisao, 100.0)
-        mensagem_placar = f"""📊 Placar CLEVER
-SG: {placar['ganhos_seguidos']}
-1G: {placar['ganhos_gale1']}
-2G: {placar['ganhos_gale2']}
-E: {placar['empates']}
-L: {placar['losses']}
-Acertos: {total_acertos}
-Erros: {placar['losses']}
-Precisão: {precisao:.2f}%"""
+        mensagem_placar = f"""🚀 CLEVER PERFORMANCE 🚀
+✅SEM GALE: {placar['ganhos_seguidos']}
+🔁GALE 1: {placar['ganhos_gale1']}
+🔁GALE 2: {placar['ganhos_gale2']}
+🟡EMPATES: {placar['empates']}
+❌LOSS: {placar['losses']}
+🎯ACERTOS: {total_acertos}
+❌ERROS: {placar['losses']}
+🔥PRECISÃO: {precisao:.2f}%
+💡O SEGREDO É A DISCIPLINA 💡"""
         await bot.send_message(chat_id=CHAT_ID, text=mensagem_placar)
     except TelegramError:
         pass
@@ -248,15 +249,16 @@ async def enviar_relatorio():
             total_sinais = total_acertos + placar['losses']
             precisao = (total_acertos / total_sinais * 100) if total_sinais > 0 else 0.0
             precisao = min(precisao, 100.0)
-            msg = f"""📈 Relatório CLEVER
-SG: {placar['ganhos_seguidos']}
-1G: {placar['ganhos_gale1']}
-2G: {placar['ganhos_gale2']}
-E: {placar['empates']}
-L: {placar['losses']}
-Acertos: {total_acertos}
-Erros: {placar['losses']}
-Precisão: {precisao:.2f}%"""
+            msg = f"""🚀 CLEVER PERFORMANCE 🚀
+✅SEM GALE: {placar['ganhos_seguidos']}
+🔁GALE 1: {placar['ganhos_gale1']}
+🔁GALE 2: {placar['ganhos_gale2']}
+🟡EMPATES: {placar['empates']}
+❌LOSS: {placar['losses']}
+🎯ACERTOS: {total_acertos}
+❌ERROS: {placar['losses']}
+🔥PRECISÃO: {precisao:.2f}%
+💡O SEGREDO É A DISCIPLINA 💡"""
             await bot.send_message(chat_id=CHAT_ID, text=msg)
         except TelegramError:
             pass
