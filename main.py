@@ -8,8 +8,8 @@ from collections import Counter
 import uuid
 
 # Configurações do Bot (valores fixos para teste)
-BOT_TOKEN = "8003298514:AAEP-T_vzKjoXL3dwuq7hZWgzbKZpFvZgSg"
-CHAT_ID = "-1002786621018"
+BOT_TOKEN = "7703975421:AAG-CG5Who2xs4NlevJqB5TNvjjzeUEDz8o"
+CHAT_ID = "-1002859771274"
 API_URL = "https://api.casinoscores.com/svc-evolution-game-events/api/bacbo/latest"
 
 # Inicializar o bot
@@ -196,10 +196,10 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia):
             logging.info(f"Sinal bloqueado: aguardando validação ou sinal ativo (ID: {padrao_id})")
             return False
         sequencia_str = " ".join(sequencia)
-        mensagem = f"""💡 ENTRAR COM SCOTT 💡
+        mensagem = f"""💡 CLEVER ANALISOU 💡
 🧠 APOSTA EM: {sinal}
-🛡️ Proteja o EMPATE 🟡
-🤑 MBORA GANHAR🤑"""
+🛡️ Proteja o TIE 🟡
+🤑 VAI ENTRAR DINHEIRO 🤑"""
         message = await bot.send_message(chat_id=CHAT_ID, text=mensagem)
         sinais_ativos.append({
             "sinal": sinal,
@@ -217,13 +217,28 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia):
         logging.error(f"Erro ao enviar sinal: {e}")
         raise
 
+async def resetar_placar():
+    global placar
+    placar = {
+        "ganhos_seguidos": 0,
+        "ganhos_gale1": 0,
+        "ganhos_gale2": 0,
+        "losses": 0,
+        "empates": 0
+    }
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text="🔄 Placar resetado após 10 erros! Começando do zero.")
+        await enviar_placar()
+    except TelegramError:
+        pass
+
 async def enviar_placar():
     try:
         total_acertos = placar['ganhos_seguidos'] + placar['ganhos_gale1'] + placar['ganhos_gale2'] + placar['empates']
         total_sinais = total_acertos + placar['losses']
         precisao = (total_acertos / total_sinais * 100) if total_sinais > 0 else 0.0
         precisao = min(precisao, 100.0)
-        mensagem_placar = f"""🚀PLACAR DO SCOTT🚀
+        mensagem_placar = f"""🚀 CLEVER PERFORMANCE 🚀
 ✅SEM GALE: {placar['ganhos_seguidos']}
 🔁GALE 1: {placar['ganhos_gale1']}
 🔁GALE 2: {placar['ganhos_gale2']}
@@ -255,7 +270,7 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                             await bot.delete_message(chat_id=CHAT_ID, message_id=sinal_ativo["gale_message_id"])
                         except TelegramError:
                             pass
-                    mensagem_validacao = f"✅ GANHAMOS\n🎲 Resultado: 🔵 {player_score} x 🔴 {banker_score}"
+                    mensagem_validacao = f" 🤡ENTROU DINHEIRO🤡\n🎲 Resultado: 🔵 {player_score} x 🔴 {banker_score}"
                     await bot.send_message(chat_id=CHAT_ID, text=mensagem_validacao)
                     await enviar_placar()
                     ultimo_padrao_id = None
@@ -289,8 +304,11 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                                 await bot.delete_message(chat_id=CHAT_ID, message_id=sinal_ativo["gale_message_id"])
                             except TelegramError:
                                 pass
-                        await bot.send_message(chat_id=CHAT_ID, text="❌ ERRAMOS NESSA❌")
+                        await bot.send_message(chat_id=CHAT_ID, text="❌ NÃO FOI DESSA❌")
                         await enviar_placar()
+                        # Verifica limite de erros e reseta placar se necessário
+                        if placar["losses"] >= 10:
+                            await resetar_placar()
                         ultimo_padrao_id = None
                         aguardando_validacao = False  # Libera para novos sinais mesmo em perda
                         sinais_ativos.remove(sinal_ativo)
@@ -325,7 +343,7 @@ async def enviar_monitoramento():
                         await bot.delete_message(chat_id=CHAT_ID, message_id=ultima_mensagem_monitoramento)
                     except TelegramError:
                         pass
-                message = await bot.send_message(chat_id=CHAT_ID, text="🧠ANALISANDO🧠")
+                message = await bot.send_message(chat_id=CHAT_ID, text="🔎MONITORANDO A MESA…")
                 ultima_mensagem_monitoramento = message.message_id
             await asyncio.sleep(15)
         except TelegramError:
@@ -339,7 +357,7 @@ async def enviar_relatorio():
             total_sinais = total_acertos + placar['losses']
             precisao = (total_acertos / total_sinais * 100) if total_sinais > 0 else 0.0
             precisao = min(precisao, 100.0)
-            msg = f"""🚀 PLACAR DO SCOTT🚀
+            msg = f"""🚀 CLEVER PERFORMANCE 🚀
 ✅SEM GALE: {placar['ganhos_seguidos']}
 🔁GALE 1: {placar['ganhos_gale1']}
 🔁GALE 2: {placar['ganhos_gale2']}
