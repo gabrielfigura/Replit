@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 import logging
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CallbackQueryHandler
+from telegram.ext import Application
 from telegram.error import TelegramError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from collections import Counter
@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %
 
 # Histórico e estado
 historico = []
-empates_historico = []  # Novo: armazena resultados de empates
+empates_historico = []  # Mantido para possíveis usos futuros
 ultimo_padrao_id = None
 ultimo_resultado_id = None
 sinais_ativos = []
@@ -204,9 +204,8 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia):
 🛡️ Proteja o TIE 🟡
 🤑 VAI ENTRAR DINHEIRO 🤑
 ⬇️ ENTRA NA COMUNIDADE DO WHATSAPP ⬇️"""
-        # Adiciona os botões "EMPATES 🟡" e "Entrar no WhatsApp"
+        # Adiciona apenas o botão do WhatsApp
         keyboard = [
-            [InlineKeyboardButton("EMPATES 🟡", callback_data="mostrar_empates")],
             [InlineKeyboardButton("Entrar no WhatsApp", url="https://chat.whatsapp.com/D61X4xCSDyk02srBHqBYXq")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -227,20 +226,6 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia):
         logging.error(f"Erro ao enviar sinal: {e}")
         raise
 
-async def mostrar_empates(update, context):
-    """Handler para o botão EMPATES 🟡"""
-    try:
-        if not empates_historico:
-            await update.callback_query.answer("Nenhum empate registrado ainda.")
-            return
-        empates_str = "\n".join([f"Empate {i+1}: 🟡 (🔵 {e['player_score']} x 🔴 {e['banker_score']})" for i, e in enumerate(empates_historico)])
-        mensagem = f"📊 Histórico de Empates 🟡\n\n{empates_str}"
-        await update.callback_query.message.reply_text(mensagem)
-        await update.callback_query.answer()
-    except TelegramError as e:
-        logging.error(f"Erro ao mostrar empates: {e}")
-        await update.callback_query.answer("Erro ao exibir empates.")
-
 async def resetar_placar():
     global placar
     placar = {
@@ -258,18 +243,18 @@ async def resetar_placar():
 
 async def enviar_placar():
     try:
-        total_acertos = placar['ganhos_seguidos'] + placar['ganhos_gale1'] + placar['ganhos_gale2'] + placar['empates']
-        total_sinais = total_acertos + placar['losses']
+        total_acertos = placar['ganhos_seguidos'] + placar['ganhos_gale1'] + placar['ganhos_gale2']
+        total_sinais = total_acertos + placar['losses'] + placar['empates']
         precisao = (total_acertos / total_sinais * 100) if total_sinais > 0 else 0.0
         precisao = min(precisao, 100.0)
         mensagem_placar = f"""🚀 CLEVER PERFORMANCE 🚀
-✅SEM GALE: {placar['ganhos_seguidos']}
-🔁GALE 1: {placar['ganhos_gale1']}
-🔁GALE 2: {placar['ganhos_gale2']}
-🟡EMPATES: {placar['empates']}
-🎯ACERTOS: {total_acertos}
-❌ERROS: {placar['losses']}
-🔥PRECISÃO: {precisao:.2f}%"""
+✅ SEM GALE: {placar['ganhos_seguidos']}
+🔁 GALE 1: {placar['ganhos_gale1']}
+🔁 GALE 2: {placar['ganhos_gale2']}
+🟡 EMPATES: {placar['empates']}
+🎯 ACERTOS: {total_acertos}
+❌ ERROS: {placar['losses']}
+🔥 PRECISÃO: {precisao:.2f}%"""
         await bot.send_message(chat_id=CHAT_ID, text=mensagem_placar)
     except TelegramError:
         pass
@@ -283,11 +268,26 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
             empates_historico.append({"player_score": player_score, "banker_score": banker_score})
             if len(empates_historico) > 50:  # Limita o histórico para evitar excesso de memória
                 empates_historico.pop(0)
+            placar["empates"] += 1
+            mensagem_validacao = f"🟡 EMPATE\n🎲 Resultado: 🔵 {player_score} x 🔴 {banker_score}"
+            await bot.send_message(chat_id=CHAT_ID, text=mensagem_validacao)
+            await enviar_placar()
+            for sinal_ativo in sinais_ativos[:]:
+                if sinal_ativo["gale_message_id"]:
+                    try:
+                        await bot.delete_message(chat_id=CHAT_ID, message_id=sinal_ativo["gale_message_id"])
+                    except TelegramError:
+                        pass
+                ultimo_padrao_id = None
+                aguardando_validacao = False
+                sinais_ativos.remove(sinal_ativo)
+                detecao_pausada = False
+                logging.info(f"Sinal encerrado devido a empate para padrão {sinal_ativo['padrao_id']}")
+            ultima_mensagem_monitoramento = None
+            return
         for sinal_ativo in sinais_ativos[:]:
             if sinal_ativo["resultado_id"] != resultado_id:
-                if resultado == sinal_ativo["sinal"] or resultado == "🟡":
-                    if resultado == "🟡":
-                        placar["empates"] += 1
+                if resultado == sinal_ativo["sinal"]:
                     if sinal_ativo["gale_nivel"] == 0:
                         placar["ganhos_seguidos"] += 1
                     elif sinal_ativo["gale_nivel"] == 1:
@@ -299,7 +299,7 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                             await bot.delete_message(chat_id=CHAT_ID, message_id=sinal_ativo["gale_message_id"])
                         except TelegramError:
                             pass
-                    mensagem_validacao = f" 🤡ENTROU DINHEIRO🤡\n🎲 Resultado: 🔵 {player_score} x 🔴 {banker_score}"
+                    mensagem_validacao = f"🤡 ENTROU DINHEIRO 🤡\n🎲 Resultado: 🔵 {player_score} x 🔴 {banker_score}"
                     await bot.send_message(chat_id=CHAT_ID, text=mensagem_validacao)
                     await enviar_placar()
                     ultimo_padrao_id = None
@@ -333,7 +333,7 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                                 await bot.delete_message(chat_id=CHAT_ID, message_id=sinal_ativo["gale_message_id"])
                             except TelegramError:
                                 pass
-                        await bot.send_message(chat_id=CHAT_ID, text="❌ NÃO FOI DESSA❌")
+                        await bot.send_message(chat_id=CHAT_ID, text="❌ NÃO FOI DESSA ❌")
                         await enviar_placar()
                         if placar["losses"] >= 10:
                             await resetar_placar()
@@ -370,7 +370,7 @@ async def enviar_monitoramento():
                         await bot.delete_message(chat_id=CHAT_ID, message_id=ultima_mensagem_monitoramento)
                     except TelegramError:
                         pass
-                message = await bot.send_message(chat_id=CHAT_ID, text="🔎MONITORANDO A MESA…")
+                message = await bot.send_message(chat_id=CHAT_ID, text="🔎 MONITORANDO A MESA…")
                 ultima_mensagem_monitoramento = message.message_id
             await asyncio.sleep(15)
         except TelegramError:
@@ -380,18 +380,18 @@ async def enviar_monitoramento():
 async def enviar_relatorio():
     while True:
         try:
-            total_acertos = placar['ganhos_seguidos'] + placar['ganhos_gale1'] + placar['ganhos_gale2'] + placar['empates']
-            total_sinais = total_acertos + placar['losses']
+            total_acertos = placar['ganhos_seguidos'] + placar['ganhos_gale1'] + placar['ganhos_gale2']
+            total_sinais = total_acertos + placar['losses'] + placar['empates']
             precisao = (total_acertos / total_sinais * 100) if total_sinais > 0 else 0.0
             precisao = min(precisao, 100.0)
             msg = f"""🚀 CLEVER PERFORMANCE 🚀
-✅SEM GALE: {placar['ganhos_seguidos']}
-🔁GALE 1: {placar['ganhos_gale1']}
-🔁GALE 2: {placar['ganhos_gale2']}
-🟡EMPATES: {placar['empates']}
-🎯ACERTOS: {total_acertos}
-❌ERROS: {placar['losses']}
-🔥PRECISÃO: {precisao:.2f}%"""
+✅ SEM GALE: {placar['ganhos_seguidos']}
+🔁 GALE 1: {placar['ganhos_gale1']}
+🔁 GALE 2: {placar['ganhos_gale2']}
+🟡 EMPATES: {placar['empates']}
+🎯 ACERTOS: {total_acertos}
+❌ ERROS: {placar['losses']}
+🔥 PRECISÃO: {precisao:.2f}%"""
             await bot.send_message(chat_id=CHAT_ID, text=msg)
         except TelegramError:
             pass
@@ -405,8 +405,6 @@ async def enviar_erro_telegram(erro_msg):
 
 async def main():
     global historico, ultimo_padrao_id, ultimo_resultado_id, rodadas_desde_erro, detecao_pausada, aguardando_validacao
-    # Registrar o handler para o botão de empates
-    application.add_handler(CallbackQueryHandler(mostrar_empates, pattern="mostrar_empates"))
     # Iniciar o polling da aplicação
     await application.initialize()
     await application.start()
@@ -433,7 +431,7 @@ async def main():
             await enviar_resultado(resultado, player_score, banker_score, resultado_id)
             if not detecao_pausada and not aguardando_validacao and not sinais_ativos:
                 for padrao in PADROES:
-                    seq_len = len(padrao["sequencia"])  # Corrigido de 'padro' para 'padrao'
+                    seq_len = len(padrao["sequencia"])
                     if len(historico) >= seq_len:
                         if historico[-seq_len:] == padrao["sequencia"] and padrao["id"] != ultimo_padrao_id:
                             if verificar_tendencia(historico, padrao["sinal"]):
