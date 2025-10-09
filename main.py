@@ -1,7 +1,8 @@
 import asyncio
 import aiohttp
 import logging
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CallbackQueryHandler
 from telegram.error import TelegramError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from collections import Counter
@@ -12,14 +13,16 @@ BOT_TOKEN = "7703975421:AAG-CG5Who2xs4NlevJqB5TNvjjzeUEDz8o"
 CHAT_ID = "-1002859771274"
 API_URL = "https://api.casinoscores.com/svc-evolution-game-events/api/bacbo/latest"
 
-# Inicializar o bot
+# Inicializar o bot e a aplicação
 bot = Bot(token=BOT_TOKEN)
+application = Application.builder().token(BOT_TOKEN).build()
 
 # Configuração de logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Histórico e estado
 historico = []
+empates_historico = []  # Novo: armazena resultados de empates
 ultimo_padrao_id = None
 ultimo_resultado_id = None
 sinais_ativos = []
@@ -28,12 +31,12 @@ placar = {
     "ganhos_gale1": 0,
     "ganhos_gale2": 0,
     "losses": 0,
-    "empates": 0   # 👈 Novo campo para empates
+    "empates": 0
 }
 rodadas_desde_erro = 0
 ultima_mensagem_monitoramento = None
 detecao_pausada = False
-aguardando_validacao = False  # Nova flag para bloquear novos sinais até validação
+aguardando_validacao = False
 
 # Mapeamento de outcomes para emojis
 OUTCOME_MAP = {
@@ -42,9 +45,9 @@ OUTCOME_MAP = {
     "Tie": "🟡"
 }
 
-# Padrões
+# Padrões (mantido como no código original)
 PADROES = [
- { "id": 1, "sequencia": ["🔵", "🔴", "🔵", "🔴"], "sinal": "🔵" },
+    { "id": 1, "sequencia": ["🔵", "🔴", "🔵", "🔴"], "sinal": "🔵" },
   { "id": 2, "sequencia": ["🔴", "🔴", "🔵", "🔵"], "sinal": "🔵" },
   { "id": 3, "sequencia": ["🔵", "🔵", "🔵", "🔴"], "sinal": "🔵" },
   { "id": 4, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴" },
@@ -199,8 +202,13 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia):
         mensagem = f"""💡 CLEVER ANALISOU 💡
 🧠 APOSTA EM: {sinal}
 🛡️ Proteja o TIE 🟡
-🤑 VAI ENTRAR DINHEIRO 🤑"""
-        message = await bot.send_message(chat_id=CHAT_ID, text=mensagem)
+🤑 VAI ENTRAR DINHEIRO 🤑
+⬇️ENTRA NA COMUNIDADE DO WHATSAPP ⬇️
+https://chat.whatsapp.com/D61X4xCSDyk02srBHqBYXq"""
+        # Adiciona o botão "EMPATES 🟡"
+        keyboard = [[InlineKeyboardButton("EMPATES 🟡", callback_data="mostrar_empates")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        message = await bot.send_message(chat_id=CHAT_ID, text=mensagem, reply_markup=reply_markup)
         sinais_ativos.append({
             "sinal": sinal,
             "padrao_id": padrao_id,
@@ -210,12 +218,26 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia):
             "gale_nivel": 0,
             "gale_message_id": None
         })
-        aguardando_validacao = True  # Bloqueia novos sinais até validação
+        aguardando_validacao = True
         logging.info(f"Sinal enviado para padrão {padrao_id}: {sinal}")
         return message.message_id
     except TelegramError as e:
         logging.error(f"Erro ao enviar sinal: {e}")
         raise
+
+async def mostrar_empates(update, context):
+    """Handler para o botão EMPATES 🟡"""
+    try:
+        if not empates_historico:
+            await update.callback_query.answer("Nenhum empate registrado ainda.")
+            return
+        empates_str = "\n".join([f"Empate {i+1}: 🟡 (🔵 {e['player_score']} x 🔴 {e['banker_score']})" for i, e in enumerate(empates_historico)])
+        mensagem = f"📊 Histórico de Empates 🟡\n\n{empates_str}"
+        await update.callback_query.message.reply_text(mensagem)
+        await update.callback_query.answer()
+    except TelegramError as e:
+        logging.error(f"Erro ao mostrar empates: {e}")
+        await update.callback_query.answer("Erro ao exibir empates.")
 
 async def resetar_placar():
     global placar
@@ -252,8 +274,13 @@ async def enviar_placar():
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(TelegramError))
 async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
-    global rodadas_desde_erro, ultima_mensagem_monitoramento, detecao_pausada, placar, ultimo_padrao_id, aguardando_validacao
+    global rodadas_desde_erro, ultima_mensagem_monitoramento, detecao_pausada, placar, ultimo_padrao_id, aguardando_validacao, empates_historico
     try:
+        # Armazena empates no histórico
+        if resultado == "🟡":
+            empates_historico.append({"player_score": player_score, "banker_score": banker_score})
+            if len(empates_historico) > 50:  # Limita o histórico para evitar excesso de memória
+                empates_historico.pop(0)
         for sinal_ativo in sinais_ativos[:]:
             if sinal_ativo["resultado_id"] != resultado_id:
                 if resultado == sinal_ativo["sinal"] or resultado == "🟡":
@@ -274,7 +301,7 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                     await bot.send_message(chat_id=CHAT_ID, text=mensagem_validacao)
                     await enviar_placar()
                     ultimo_padrao_id = None
-                    aguardando_validacao = False  # Libera para novos sinais
+                    aguardando_validacao = False
                     sinais_ativos.remove(sinal_ativo)
                     detecao_pausada = False
                     logging.info(f"Sinal validado com sucesso para padrão {sinal_ativo['padrao_id']}")
@@ -306,11 +333,10 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                                 pass
                         await bot.send_message(chat_id=CHAT_ID, text="❌ NÃO FOI DESSA❌")
                         await enviar_placar()
-                        # Verifica limite de erros e reseta placar se necessário
                         if placar["losses"] >= 10:
                             await resetar_placar()
                         ultimo_padrao_id = None
-                        aguardando_validacao = False  # Libera para novos sinais mesmo em perda
+                        aguardando_validacao = False
                         sinais_ativos.remove(sinal_ativo)
                         detecao_pausada = False
                         logging.info(f"Sinal perdido para padrão {sinal_ativo['padrao_id']}, validação liberada")
@@ -326,7 +352,6 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                 sinais_ativos.remove(sinal_ativo)
                 detecao_pausada = False
                 logging.info(f"Sinal expirado para padrão {sinal_ativo['padrao_id']}, validação liberada")
-        # Se não há sinais ativos, libera a flag
         if not sinais_ativos:
             aguardando_validacao = False
     except TelegramError:
@@ -378,6 +403,12 @@ async def enviar_erro_telegram(erro_msg):
 
 async def main():
     global historico, ultimo_padrao_id, ultimo_resultado_id, rodadas_desde_erro, detecao_pausada, aguardando_validacao
+    # Registrar o handler para o botão de empates
+    application.add_handler(CallbackQueryHandler(mostrar_empates, pattern="mostrar_empates"))
+    # Iniciar o polling da aplicação
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
     asyncio.create_task(enviar_relatorio())
     asyncio.create_task(enviar_monitoramento())
     try:
@@ -398,17 +429,16 @@ async def main():
             if len(historico) > 50:
                 historico.pop(0)
             await enviar_resultado(resultado, player_score, banker_score, resultado_id)
-            # Só verifica padrões se não estiver pausado, sem sinais ativos e aguardando validação
             if not detecao_pausada and not aguardando_validacao and not sinais_ativos:
                 for padrao in PADROES:
-                    seq_len = len(padrao["sequencia"])
+                    seq_len = len(padro["sequencia"])
                     if len(historico) >= seq_len:
                         if historico[-seq_len:] == padrao["sequencia"] and padrao["id"] != ultimo_padrao_id:
                             if verificar_tendencia(historico, padrao["sinal"]):
                                 enviado = await enviar_sinal(padrao["sinal"], padrao["id"], resultado_id, padrao["sequencia"])
                                 if enviado:
                                     ultimo_padrao_id = padrao["id"]
-                                    break  # Para após enviar o primeiro sinal válido
+                                    break
             await asyncio.sleep(2)
         except Exception as e:
             await enviar_erro_telegram(str(e))
