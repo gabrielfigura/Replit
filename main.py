@@ -45,7 +45,7 @@ OUTCOME_MAP = {
     "Tie": ("🟡", "T")
 }
 
-# Funções de estratégias (do script Messias Bac Bo)
+# Funções de estratégias (do script Messias Bac Bo, exceto empate seco)
 def oposto(c): return 'P' if c == 'B' else 'B'
 
 def detectar_rampa(hist): return len(hist) >= 3 and hist[-1] == hist[-2] == hist[-3]
@@ -67,8 +67,6 @@ def detectar_v(hist): return len(hist) >= 3 and hist[-3] == hist[-1] and hist[-2
 def detectar_repeticao_quinta(hist): return len(hist) >= 5 and hist[-1] == hist[-5]
 
 def detectar_quebra_surf(hist): return len(hist) >= 5 and hist[-4] == hist[-3] == hist[-2] and hist[-1] != hist[-2] and hist[-1] == hist[-4]
-
-def detectar_empate_seco(hist): return len(hist) >= 2 and hist[-1] == 'T' and hist[-2] == 'T'
 
 def estrategia_seq3(hist):
     if len(hist) >= 3 and hist[-1] == hist[-2] == hist[-3] and hist[-1] in ('P','B'):
@@ -103,7 +101,6 @@ def gerar_sinais_completos(hist):
     if detectar_v(hist): sinais.append(("V", oposto(hist[-1])))
     if detectar_repeticao_quinta(hist): sinais.append(("Repetição na 5ª", hist[-1]))
     if detectar_quebra_surf(hist): sinais.append(("Quebra de Surf", hist[-1]))
-    if detectar_empate_seco(hist): sinais.append(("Empate Seco (T,T)", "T"))
 
     s = estrategia_seq3(hist)
     if s: sinais.append(s)
@@ -116,7 +113,8 @@ def gerar_sinais_completos(hist):
     uniq = []
     for pad, sug in sinais:
         if sug not in seen:
-            uniq.append((pad, sug)); seen.add(sug)
+            uniq.append((pad, sug))
+            seen.add(sug)
     return uniq
 
 @retry(stop=stop_after_attempt(7), wait=wait_exponential(multiplier=1, min=4, max=60), retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)))
@@ -126,20 +124,20 @@ async def fetch_resultado():
         try:
             async with session.get(API_URL, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status != 200:
-                    return None, None, None, None
+                    return None, None, None, None, None
                 data = await response.json()
                 if 'data' not in data or 'result' not in data['data'] or 'outcome' not in data['data']['result']:
-                    return None, None, None, None
+                    return None, None, None, None, None
                 if 'id' not in data:
-                    return None, None, None, None
+                    return None, None, None, None, None
                 if data['data'].get('status') != 'Resolved':
-                    return None, None, None, None
+                    return None, None, None, None, None
                 resultado_id = data['id']
                 outcome = data['data']['result']['outcome']
                 player_score = data['data']['result'].get('playerDice', {}).get('score', 0)
                 banker_score = data['data']['result'].get('bankerDice', {}).get('score', 0)
                 if outcome not in OUTCOME_MAP:
-                    return None, None, None, None
+                    return None, None, None, None, None
                 resultado, letra = OUTCOME_MAP[outcome]
                 return resultado, resultado_id, player_score, banker_score, letra
         except:
