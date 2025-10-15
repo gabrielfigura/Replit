@@ -38,84 +38,116 @@ ultima_mensagem_monitoramento = None
 detecao_pausada = False
 aguardando_validacao = False
 
-# Mapeamento de outcomes para emojis e letras
+# Mapeamento de outcomes para emojis
 OUTCOME_MAP = {
-    "PlayerWon": ("🔵", "P"),
-    "BankerWon": ("🔴", "B"),
-    "Tie": ("🟡", "T")
+    "PlayerWon": "🔵",
+    "BankerWon": "🔴",
+    "Tie": "🟡"
 }
 
-# Funções de estratégias (do script Messias Bac Bo, exceto empate seco)
-def oposto(c): return 'P' if c == 'B' else 'B'
-
-def detectar_rampa(hist): return len(hist) >= 3 and hist[-1] == hist[-2] == hist[-3]
-
-def detectar_rampa_invertida(hist): return len(hist) >= 3 and (hist[-3] == oposto(hist[-2]) == oposto(hist[-1]))
-
-def detectar_barreira_de_4(hist): return len(hist) >= 4 and hist[-1] == hist[-2] == hist[-3] == hist[-4]
-
-def detectar_padrao_3x2(hist): return len(hist) >= 5 and hist[-5] == hist[-4] and hist[-3] == hist[-2] and hist[-1] == hist[-3]
-
-def detectar_parzinho(hist): return len(hist) >= 4 and hist[-4] == hist[-3] and hist[-2] == hist[-1]
-
-def detectar_perninhas(hist): return len(hist) >= 6 and hist[-6] == hist[-4] == hist[-2]
-
-def detectar_torres_gemeas(hist): return len(hist) >= 4 and hist[-4] == hist[-3] and hist[-2] == hist[-1] and hist[-4] == hist[-2]
-
-def detectar_v(hist): return len(hist) >= 3 and hist[-3] == hist[-1] and hist[-2] != hist[-1]
-
-def detectar_repeticao_quinta(hist): return len(hist) >= 5 and hist[-1] == hist[-5]
-
-def detectar_quebra_surf(hist): return len(hist) >= 5 and hist[-4] == hist[-3] == hist[-2] and hist[-1] != hist[-2] and hist[-1] == hist[-4]
-
-def estrategia_seq3(hist):
-    if len(hist) >= 3 and hist[-1] == hist[-2] == hist[-3] and hist[-1] in ('P','B'):
-        return ("Seq3", oposto(hist[-1]))
-    return None
-
-def estrategia_alternancia(hist):
-    if len(hist) >= 4:
-        last4 = hist[-4:]
-        if last4[0] == last4[2] and last4[1] == last4[3] and last4[0] != last4[1] and last4[0] in ('P','B'):
-            return ("Alternancia", oposto(last4[-1]))
-    return None
-
-def estrategia_majority(hist, n=10):
-    sample = [x for x in list(hist)[-n:] if x in ('P','B')]
-    if len(sample) >= 4:
-        cnt = Counter(sample)
-        most, count = cnt.most_common(1)[0]
-        if count > len(sample) / 2:
-            return (f"Major_{n}", most)
-    return None
-
-def gerar_sinais_completos(hist):
-    sinais = []
-    if detectar_rampa(hist): sinais.append(("Rampa", oposto(hist[-1])))
-    if detectar_rampa_invertida(hist): sinais.append(("Rampa Invertida", hist[-1]))
-    if detectar_barreira_de_4(hist): sinais.append(("Barreira de 4", oposto(hist[-1])))
-    if detectar_padrao_3x2(hist): sinais.append(("3x2", oposto(hist[-1])))
-    if detectar_parzinho(hist): sinais.append(("Parzinho", oposto(hist[-1])))
-    if detectar_perninhas(hist): sinais.append(("Perninhas", hist[-1]))
-    if detectar_torres_gemeas(hist): sinais.append(("Torres Gêmeas", oposto(hist[-1])))
-    if detectar_v(hist): sinais.append(("V", oposto(hist[-1])))
-    if detectar_repeticao_quinta(hist): sinais.append(("Repetição na 5ª", hist[-1]))
-    if detectar_quebra_surf(hist): sinais.append(("Quebra de Surf", hist[-1]))
-
-    s = estrategia_seq3(hist)
-    if s: sinais.append(s)
-    s = estrategia_alternancia(hist)
-    if s: sinais.append(s)
-    s = estrategia_majority(hist, n=10)
-    if s: sinais.append(s)
-
-    seen = set()
-    uniq = []
-    for pad, sug in sinais:
-        if sug not in seen:
-            uniq.append((pad, sug))
-            seen.add(sug)
-    return uniq
+# Padrões
+PADROES = [
+    {"id": 1, "sequencia": ["🔵", "🔴", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 2, "sequencia": ["🔴", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 3, "sequencia": ["🔵", "🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 4, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 5, "sequencia": ["🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 6, "sequencia": ["🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 7, "sequencia": ["🔴", "🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 8, "sequencia": ["🔵", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 9, "sequencia": ["🔴", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 10, "sequencia": ["🔵", "🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 11, "sequencia": ["🔵", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 12, "sequencia": ["🔴", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 13, "sequencia": ["🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 14, "sequencia": ["🔴", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 15, "sequencia": ["🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 16, "sequencia": ["🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 17, "sequencia": ["🔵", "🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 18, "sequencia": ["🔵", "🔴", "🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 19, "sequencia": ["🔴", "🔵", "🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 20, "sequencia": ["🔵", "🔵", "🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 21, "sequencia": ["🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 22, "sequencia": ["🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 23, "sequencia": ["🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 24, "sequencia": ["🔴", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 25, "sequencia": ["🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 26, "sequencia": ["🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 27, "sequencia": ["🔵", "🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 28, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 29, "sequencia": ["🔵", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 30, "sequencia": ["🔴", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 31, "sequencia": ["🔵", "🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 32, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 33, "sequencia": ["🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 34, "sequencia": ["🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 35, "sequencia": ["🔴", "🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 36, "sequencia": ["🔵", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 37, "sequencia": ["🔴", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 38, "sequencia": ["🔵", "🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 39, "sequencia": ["🔵", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 40, "sequencia": ["🔴", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 41, "sequencia": ["🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 42, "sequencia": ["🔴", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 43, "sequencia": ["🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 44, "sequencia": ["🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 45, "sequencia": ["🔵", "🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 46, "sequencia": ["🔵", "🔴", "🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 47, "sequencia": ["🔴", "🔵", "🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 48, "sequencia": ["🔵", "🔵", "🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 49, "sequencia": ["🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 50, "sequencia": ["🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 51, "sequencia": ["🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 52, "sequencia": ["🔴", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 53, "sequencia": ["🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 54, "sequencia": ["🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 55, "sequencia": ["🔵", "🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 56, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 57, "sequencia": ["🔵", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 58, "sequencia": ["🔴", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 59, "sequencia": ["🔵", "🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 60, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 61, "sequencia": ["🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 62, "sequencia": ["🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 63, "sequencia": ["🔴", "🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 64, "sequencia": ["🔵", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 65, "sequencia": ["🔴", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 66, "sequencia": ["🔵", "🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 67, "sequencia": ["🔵", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 68, "sequencia": ["🔴", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 69, "sequencia": ["🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 70, "sequencia": ["🔴", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 71, "sequencia": ["🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 72, "sequencia": ["🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 73, "sequencia": ["🔵", "🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 74, "sequencia": ["🔵", "🔴", "🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 75, "sequencia": ["🔴", "🔵", "🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 76, "sequencia": ["🔵", "🔵", "🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 77, "sequencia": ["🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 78, "sequencia": ["🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 79, "sequencia": ["🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 80, "sequencia": ["🔴", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 81, "sequencia": ["🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 82, "sequencia": ["🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 83, "sequencia": ["🔵", "🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 84, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 85, "sequencia": ["🔵", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 86, "sequencia": ["🔴", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 87, "sequencia": ["🔵", "🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 88, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 89, "sequencia": ["🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 90, "sequencia": ["🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 91, "sequencia": ["🔴", "🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 92, "sequencia": ["🔵", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 93, "sequencia": ["🔴", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 94, "sequencia": ["🔵", "🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 95, "sequencia": ["🔵", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 96, "sequencia": ["🔴", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 97, "sequencia": ["🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 98, "sequencia": ["🔴", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 99, "sequencia": ["🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 100, "sequencia": ["🔴", "🔵", "🔵"], "sinal": "🔵"}
+]
 
 @retry(stop=stop_after_attempt(7), wait=wait_exponential(multiplier=1, min=4, max=60), retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)))
 async def fetch_resultado():
@@ -124,27 +156,37 @@ async def fetch_resultado():
         try:
             async with session.get(API_URL, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status != 200:
-                    return None, None, None, None, None
+                    return None, None, None, None
                 data = await response.json()
                 if 'data' not in data or 'result' not in data['data'] or 'outcome' not in data['data']['result']:
-                    return None, None, None, None, None
+                    return None, None, None, None
                 if 'id' not in data:
-                    return None, None, None, None, None
+                    return None, None, None, None
                 if data['data'].get('status') != 'Resolved':
-                    return None, None, None, None, None
+                    return None, None, None, None
                 resultado_id = data['id']
                 outcome = data['data']['result']['outcome']
                 player_score = data['data']['result'].get('playerDice', {}).get('score', 0)
                 banker_score = data['data']['result'].get('bankerDice', {}).get('score', 0)
                 if outcome not in OUTCOME_MAP:
-                    return None, None, None, None, None
-                resultado, letra = OUTCOME_MAP[outcome]
-                return resultado, resultado_id, player_score, banker_score, letra
+                    return None, None, None, None
+                resultado = OUTCOME_MAP[outcome]
+                return resultado, resultado_id, player_score, banker_score
         except:
-            return None, None, None, None, None
+            return None, None, None, None
+
+def verificar_tendencia(historico, sinal, tamanho_janela=8):
+    if len(historico) < tamanho_janela:
+        return True
+    janela = historico[-tamanho_janela:]
+    contagem = Counter(janela)
+    total = contagem["🔴"] + contagem["🔵"]
+    if total == 0:
+        return True
+    return True
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(TelegramError))
-async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia, padrao_nome):
+async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia):
     global ultima_mensagem_monitoramento, aguardando_validacao
     try:
         if ultima_mensagem_monitoramento:
@@ -162,6 +204,7 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia, padrao_nome):
 🛡️ Proteja o TIE 🟡
 🤑 VAI ENTRAR DINHEIRO 🤑
 ⬇️ ENTRA NA COMUNIDADE DO WHATSAPP ⬇️"""
+        # Adiciona os botões "EMPATES 🟡" e "Entrar no WhatsApp"
         keyboard = [
             [InlineKeyboardButton("Entrar no WhatsApp", url="https://chat.whatsapp.com/D61X4xCSDyk02srBHqBYXq")]
         ]
@@ -169,9 +212,7 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia, padrao_nome):
         message = await bot.send_message(chat_id=CHAT_ID, text=mensagem, reply_markup=reply_markup)
         sinais_ativos.append({
             "sinal": sinal,
-            "letra": 'P' if sinal == '🔵' else ('B' if sinal == '🔴' else 'T'),
             "padrao_id": padrao_id,
-            "padrao_nome": padrao_nome,
             "resultado_id": resultado_id,
             "sequencia": sequencia,
             "enviado_em": asyncio.get_event_loop().time(),
@@ -179,7 +220,7 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia, padrao_nome):
             "gale_message_id": None
         })
         aguardando_validacao = True
-        logging.info(f"Sinal enviado para padrão {padrao_nome} (ID: {padrao_id}): {sinal}")
+        logging.info(f"Sinal enviado para padrão {padrao_id}: {sinal}")
         return message.message_id
     except TelegramError as e:
         logging.error(f"Erro ao enviar sinal: {e}")
@@ -233,12 +274,13 @@ async def enviar_placar():
         pass
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(TelegramError))
-async def enviar_resultado(resultado, player_score, banker_score, resultado_id, letra):
+async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
     global rodadas_desde_erro, ultima_mensagem_monitoramento, detecao_pausada, placar, ultimo_padrao_id, aguardando_validacao, empates_historico
     try:
+        # Armazena empates no histórico
         if resultado == "🟡":
             empates_historico.append({"player_score": player_score, "banker_score": banker_score})
-            if len(empates_historico) > 50:
+            if len(empates_historico) > 50:  # Limita o histórico para evitar excesso de memória
                 empates_historico.pop(0)
         for sinal_ativo in sinais_ativos[:]:
             if sinal_ativo["resultado_id"] != resultado_id:
@@ -263,7 +305,7 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id, 
                     aguardando_validacao = False
                     sinais_ativos.remove(sinal_ativo)
                     detecao_pausada = False
-                    logging.info(f"Sinal validado com sucesso para padrão {sinal_ativo['padrao_nome']} (ID: {sinal_ativo['padrao_id']})")
+                    logging.info(f"Sinal validado com sucesso para padrão {sinal_ativo['padrao_id']}")
                 else:
                     if sinal_ativo["gale_nivel"] == 0:
                         detecao_pausada = True
@@ -298,7 +340,7 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id, 
                         aguardando_validacao = False
                         sinais_ativos.remove(sinal_ativo)
                         detecao_pausada = False
-                        logging.info(f"Sinal perdido para padrão {sinal_ativo['padrao_nome']} (ID: {sinal_ativo['padrao_id']}), validação liberada")
+                        logging.info(f"Sinal perdido para padrão {sinal_ativo['padrao_id']}, validação liberada")
                 ultima_mensagem_monitoramento = None
             elif asyncio.get_event_loop().time() - sinal_ativo["enviado_em"] > 300:
                 if sinal_ativo["gale_message_id"]:
@@ -310,7 +352,7 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id, 
                 aguardando_validacao = False
                 sinais_ativos.remove(sinal_ativo)
                 detecao_pausada = False
-                logging.info(f"Sinal expirado para padrão {sinal_ativo['padrao_nome']} (ID: {sinal_ativo['padrao_id']}), validação liberada")
+                logging.info(f"Sinal expirado para padrão {sinal_ativo['padrao_id']}, validação liberada")
         if not sinais_ativos:
             aguardando_validacao = False
     except TelegramError:
@@ -362,7 +404,9 @@ async def enviar_erro_telegram(erro_msg):
 
 async def main():
     global historico, ultimo_padrao_id, ultimo_resultado_id, rodadas_desde_erro, detecao_pausada, aguardando_validacao
+    # Registrar o handler para o botão de empates
     application.add_handler(CallbackQueryHandler(mostrar_empates, pattern="mostrar_empates"))
+    # Iniciar o polling da aplicação
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
@@ -374,7 +418,7 @@ async def main():
         pass
     while True:
         try:
-            resultado, resultado_id, player_score, banker_score, letra = await fetch_resultado()
+            resultado, resultado_id, player_score, banker_score = await fetch_resultado()
             if not resultado or not resultado_id:
                 await asyncio.sleep(2)
                 continue
@@ -382,21 +426,20 @@ async def main():
                 await asyncio.sleep(2)
                 continue
             ultimo_resultado_id = resultado_id
-            historico.append(letra)
+            historico.append(resultado)
             if len(historico) > 50:
                 historico.pop(0)
-            await enviar_resultado(resultado, player_score, banker_score, resultado_id, letra)
+            await enviar_resultado(resultado, player_score, banker_score, resultado_id)
             if not detecao_pausada and not aguardando_validacao and not sinais_ativos:
-                sinais = gerar_sinais_completos(historico)
-                if sinais:
-                    padrao_nome, sugestao = sinais[0]
-                    sinal_emoji = '🔵' if sugestao == 'P' else ('🔴' if sugestao == 'B' else '🟡')
-                    padrao_id = str(uuid.uuid4())
-                    sequencia = historico[-5:] if len(historico) >= 5 else historico
-                    sequencia_emoji = ['🔵' if x == 'P' else ('🔴' if x == 'B' else '🟡') for x in sequencia]
-                    enviado = await enviar_sinal(sinal_emoji, padrao_id, resultado_id, sequencia_emoji, padrao_nome)
-                    if enviado:
-                        ultimo_padrao_id = padrao_id
+                for padrao in PADROES:
+                    seq_len = len(padrao["sequencia"])  # Corrigido de 'padro' para 'padrao'
+                    if len(historico) >= seq_len:
+                        if historico[-seq_len:] == padrao["sequencia"] and padrao["id"] != ultimo_padrao_id:
+                            if verificar_tendencia(historico, padrao["sinal"]):
+                                enviado = await enviar_sinal(padrao["sinal"], padrao["id"], resultado_id, padrao["sequencia"])
+                                if enviado:
+                                    ultimo_padrao_id = padrao["id"]
+                                    break
             await asyncio.sleep(2)
         except Exception as e:
             await enviar_erro_telegram(str(e))
