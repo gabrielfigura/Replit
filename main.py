@@ -93,7 +93,7 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia):
     sequencia_str = " ".join(sequencia)
     padrao = next((p for p in PADROES if p["id"] == padrao_id), None)
     prob = await calcular_probabilidade(padrao, historico) if padrao else 0
-    msg = f"🎰 CLEVER BOT\n💡 Padrão detectado: {sequencia_str}\n👉 Apostar em: {sinal}\n📊 Probabilidade: {prob:.1f}%"
+    msg = f"🎰 CLEVER BOT🎰\n 🔥SEM GALE🔥\n 💡Padrão detectado: {sequencia_str}\n👉 Apostar em: {sinal}\n📊 Probabilidade: {prob:.1f}%"
     try:
         message = await bot.send_message(chat_id=CHAT_ID, text=msg)
         sinais_ativos.append({
@@ -119,9 +119,9 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                 if resultado == "🟡":
                     msg = f"🟡 Empate detectado\n🎲 {player_score} x {banker_score}\n📜 Padrão: {seq_str}"
                 else:
-                    msg = f"✅ SINAL CORRETO\n🏆 Resultado: {resultado}\n🎲 {player_score} x {banker_score}\n📜 Padrão: {seq_str}"
+                    msg = f"✅ GANHAMOS\n🏆 Resultado: {resultado}\n🎲 {player_score} x {banker_score}\n📜 Padrão: {seq_str}"
             else:
-                msg = f"❌ Sinal incorreto\n🎲 Player {player_score} x Banker {banker_score}\n📜 Padrão: {seq_str}"
+                msg = f"❌ PERDEMOS\n🎲 Player {player_score} x Banker {banker_score}\n📜 Padrão: {seq_str}"
             await bot.send_message(chat_id=CHAT_ID, text=msg)
             sinais_ativos.remove(sinal_ativo)
     except TelegramError as e:
