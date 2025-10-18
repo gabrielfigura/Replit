@@ -4,7 +4,7 @@ import logging
 from telegram import Bot
 from telegram.error import TelegramError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-import uuid  # ✅ necessário para gerar IDs dos padrões
+import uuid
 
 # Configurações fixas
 BOT_TOKEN = "7758723414:AAF-Zq1QPoGy2IS-iK2Wh28PfexP0_mmHHc"
@@ -23,14 +23,8 @@ detecao_pausada = False
 
 OUTCOME_MAP = {"PlayerWon": "🔵", "BankerWon": "🔴", "Tie": "🟡"}
 
-# === PADRÕES FIXOS DE TENDÊNCIA (sem gale) ===
+# === PADRÕES FIXOS DE TENDÊNCIA (apenas sequências de 4 ou mais resultados) ===
 PADROES = [
-    {"id": str(uuid.uuid4()), "sequencia": ["🔴","🔴","🔵"], "sinal": "🔵"},
-    {"id": str(uuid.uuid4()), "sequencia": ["🔵","🔵","🔴"], "sinal": "🔴"},
-    {"id": str(uuid.uuid4()), "sequencia": ["🔴","🔴","🔴"], "sinal": "🔵"},
-    {"id": str(uuid.uuid4()), "sequencia": ["🔵","🔵","🔵"], "sinal": "🔴"},
-    {"id": str(uuid.uuid4()), "sequencia": ["🔴","🔵","🔴"], "sinal": "🔵"},
-    {"id": str(uuid.uuid4()), "sequencia": ["🔵","🔴","🔵"], "sinal": "🔴"},
     {"id": str(uuid.uuid4()), "sequencia": ["🔴","🔵","🔵","🔴"], "sinal": "🔵"},
     {"id": str(uuid.uuid4()), "sequencia": ["🔵","🔴","🔴","🔵"], "sinal": "🔴"},
     {"id": str(uuid.uuid4()), "sequencia": ["🔴","🔴","🔵","🔴","🔴"], "sinal": "🔵"},
@@ -83,16 +77,13 @@ async def enviar_sinal(sinal, padrao_id, resultado_id, sequencia):
     })
     return message.message_id
 
-# === VALIDAÇÃO DE RESULTADOS (sem gale, tempo real) ===
 async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
-    """Valida o resultado e envia mensagem sem placar."""
+    """Valida o resultado e envia mensagem."""
     global sinais_ativos
-
     try:
         for sinal_ativo in sinais_ativos[:]:
             if sinal_ativo["resultado_id"] == resultado_id:
                 continue
-
             if resultado == sinal_ativo["sinal"] or resultado == "🟡":
                 if resultado == "🟡":
                     msg = f"🟡 Empate detectado\n🎲 {player_score} x {banker_score}"
@@ -100,7 +91,6 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                     msg = f"✅ SINAL CORRETO\n🏆 Resultado: {resultado}\n🎲 {player_score} x {banker_score}"
             else:
                 msg = f"❌ Sinal incorreto\n🎲 Player {player_score} x Banker {banker_score}"
-
             await bot.send_message(chat_id=CHAT_ID, text=msg)
             sinais_ativos.remove(sinal_ativo)
     except TelegramError as e:
@@ -122,10 +112,8 @@ async def enviar_monitoramento():
 
 async def main():
     global historico, ultimo_padrao_id, ultimo_resultado_id
-
     asyncio.create_task(enviar_monitoramento())
     await bot.send_message(chat_id=CHAT_ID, text="🚀 CLEVER BOT iniciado (modo sem gale).")
-
     while True:
         resultado, resultado_id, player_score, banker_score = await fetch_resultado()
         if not resultado or not resultado_id:
@@ -134,21 +122,18 @@ async def main():
         if resultado_id == ultimo_resultado_id:
             await asyncio.sleep(2)
             continue
-
         ultimo_resultado_id = resultado_id
         historico.append(resultado)
         if len(historico) > 50:
             historico.pop(0)
-
         await enviar_resultado(resultado, player_score, banker_score, resultado_id)
-
         for padrao in PADROES:
             seq_len = len(padrao["sequencia"])
             if len(historico) >= seq_len:
                 if historico[-seq_len:] == padrao["sequencia"] and padrao["id"] != ultimo_padrao_id:
                     await enviar_sinal(padrao["sinal"], padrao["id"], resultado_id, padrao["sequencia"])
                     ultimo_padrao_id = padrao["id"]
-
+                    break  # Interrompe após enviar o primeiro sinal detectado
         await asyncio.sleep(2)
 
 if __name__ == "__main__":
