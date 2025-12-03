@@ -304,10 +304,7 @@ async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
                     await bot.send_message(chat_id=CHAT_ID, text="❌NÃO FOI DESSA❌")
                     await enviar_placar()
 
-                    # Verifica se chegou a 10 losses → zera placar
-                    resetar_placar_se_10_losses()
-
-                    sinais_ativos.remove(sinal_ativo)
+                    # Verifica se che sinais_ativos.remove(sinal_ativo)
                     detecao_pausada = False
 
             ultima_mensagem_monitoramento = None
