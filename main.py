@@ -415,7 +415,7 @@ async def main():
             if not detecao_pausada and not aguardando_validacao and not sinais_ativos:
                 for padrao in PADROES:
                     seq_len = len(padrao["sequencia"])
-                    if len(historico) >= seq_len and histor | [-seq_len:] == padrao["sequencia"]:
+                    if len(historico) >= seq_len and historico| [-seq_len:] == padrao["sequencia"]:
                         if padrao["id"] != ultimo_padrao_id:
                             enviado = await enviar_sinal(padrao["sinal"], padrao["id"], resultado_id, padrao["sequencia"])
                             if enviado:
