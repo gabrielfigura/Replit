@@ -239,7 +239,7 @@ def resetar_placar_se_10_losses():
         placar["ganhos_gale2"] = 0
         placar["losses"] = 0
         placar["empates"] = 0
-        asyncio.create_task(bot.send_message(chat_id=CHAT_ID, text="10 ERROS ATINGIDOS!\nPLACAR ZERADO E REINICIADO DO ZERO")))
+        await resetar_placar_se_10_losses()
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(TelegramError))
 async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
