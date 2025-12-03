@@ -231,15 +231,6 @@ O SEGREDO É A DISCIPLINA❤️ """
     except TelegramError:
         pass
 
-def resetar_placar_se_10_losses():
-    """Zera todo o placar quando atingir 10 losses"""
-    if placar["losses"] >= 10:
-        placar["ganhos_seguidos"] = 0
-        placar["ganhos_gale1"] = 0
-        placar["ganhos_gale2"] = 0
-        placar["losses"] = 0
-        placar["empates"] = 0
-        await resetar_placar_se_10_losses()
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(TelegramError))
 async def enviar_resultado(resultado, player_score, banker_score, resultado_id):
