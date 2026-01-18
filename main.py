@@ -14,7 +14,7 @@ load_dotenv()
 
 # Configurações
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7345209825:AAE54I0tSUEdomWNOVkdTOFDnvY7jKBC4o0")
-TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "-1003683356410")  # ← ALTERE PARA O ID REAL DO CANAL
+TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "-1003683356410")
 
 API_URL = "https://api-cs.casino.org/svc-evolution-game-events/api/bacbo/latest"
 
@@ -181,7 +181,7 @@ def format_placar() -> str:
 def format_analise_text() -> str:
     return (
         "🎲 <b>ANALISANDO...</b> 🎲\n\n"
-        "<i>Aguarde o próximo sinal</i>\n\n"
+        "<i>Aguarde o próximo sinal</i>"
     )
 
 async def refresh_analise_message():
@@ -264,16 +264,11 @@ def martingale_text(color: str) -> str:
     return f"➡️ <b>Vamos para o 1º GALE</b>\n🎯 Alvo: {color}"
 
 def green_text(greens: int) -> str:
-    if greens == 1:
-        return (
-            f"🤡 <b>ENTROU DINHEIRO</b> 🤡\n"
-            f"🎲 <b>CLEVER_M</b> 🎲"
-        )
-    else:
-        return (
-            f"<b>ESTAMOS COM {greens} VITÓRIAS EM SEGUIDAS COM CLEVER_M 🔥</b>\n"
-            f"<b>PAGA BLACK G1</b>"
-        )
+    # Removida completamente a parte de sequência de vitórias
+    return (
+        f"🤡 <b>ENTROU DINHEIRO</b> 🤡\n"
+        f"🎲 <b>CLEVER_M</b> 🎲"
+    )
 
 async def resolve_after_result():
     if not state.get("waiting_for_result", False) or not state.get("last_signal_color"):
@@ -318,10 +313,7 @@ async def resolve_after_result():
         state["total_greens"] += 1
         await send_to_channel(green_text(state["greens_seguidos"]))
         await send_to_channel(placar_text)
-
-        # Mensagem extra se mais de 1 vitória seguida
-        if state["greens_seguidos"] > 1:
-            await send_to_channel(green_text(state["greens_seguidos"]))
+        # → removida a mensagem extra de sequência de vitórias
 
         state.update({
             "waiting_for_result": False,
@@ -339,7 +331,6 @@ async def resolve_after_result():
             msg_id = await send_to_channel(martingale_text(target))
             if msg_id:
                 state["martingale_message_ids"] = [msg_id]
-            # Continua esperando o próximo round
             return
         else:
             state["greens_seguidos"] = 0
