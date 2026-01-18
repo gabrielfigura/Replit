@@ -14,7 +14,7 @@ load_dotenv()
 
 # Configurações
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7345209825:AAE54I0tSUEdomWNOVkdTOFDnvY7jKBC4o0")
-TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "-1003683356410")
+TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "-1003683356410")  # MUDE SE NECESSÁRIO
 
 API_URL = "https://api-cs.casino.org/svc-evolution-game-events/api/bacbo/latest"
 
@@ -35,48 +35,58 @@ OUTCOME_MAP = {
     "🟡": "🟡",
 }
 
+# 50 padrões mais comentados/populares (baseado em relatos recentes 2024-2025)
 PADROES = [
-    {"id": 13, "sequencia": ["🔵", "🔵", "🔵", "🔴", "🔴", "🔵", "🔵"], "sinal": "🔴"},
-    {"id": 14, "sequencia": ["🔴", "🔴", "🔴", "🔵", "🔵", "🔴", "🔴"], "sinal": "🔵"},
-    {"id": 15, "sequencia": ["🔴", "🔴", "🟡"], "sinal": "🔴"},
-    {"id": 16, "sequencia": ["🔵", "🔵", "🟡"], "sinal": "🔵"},
-    {"id": 17, "sequencia": ["🔴", "🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
-    {"id": 18, "sequencia": ["🔵", "🔵", "🔴", "🔴", "🔵"], "sinal": "🔵"},
-    {"id": 19, "sequencia": ["🔴", "🔵", "🔴", "🔴"], "sinal": "🔵"},
-    {"id": 20, "sequencia": ["🔵", "🔴", "🔵", "🔵"], "sinal": "🔴"},
-    {"id": 21, "sequencia": ["🔵", "🔵", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔵"},
-    {"id": 22, "sequencia": ["🔴", "🔴", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔴"},
-    {"id": 23, "sequencia": ["🔵", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔴"},
-    {"id": 24, "sequencia": ["🔴", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔵"},
-    {"id": 25, "sequencia": ["🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
-    {"id": 26, "sequencia": ["🔴", "🔴", "🔴", "🔴"], "sinal": "🔴"},
-    {"id": 31, "sequencia": ["🔴", "🔴", "🔴"], "sinal": "🔵"},
-    {"id": 34, "sequencia": ["🔵", "🔵", "🔵"], "sinal": "🔴"},
-    {"id": 35, "sequencia": ["🔴", "🔴", "🟡"], "sinal": "🔴"},
-    {"id": 36, "sequencia": ["🔵", "🔵", "🟡"], "sinal": "🔵"},
-    {"id": 39, "sequencia": ["🔴", "🟡", "🔴", "🔵"], "sinal": "🔵"},
-    {"id": 40, "sequencia": ["🔵", "🟡", "🔵", "🔴"], "sinal": "🔴"},
-    {"id": 41, "sequencia": ["🔴", "🔵", "🟡", "🔴"], "sinal": "🔴"},
-    {"id": 42, "sequencia": ["🔵", "🔴", "🟡", "🔵"], "sinal": "🔵"},
-    {"id": 43, "sequencia": ["🔴", "🔴", "🔵", "🟡"], "sinal": "🔴"},
-    {"id": 44, "sequencia": ["🔵", "🔵", "🔴", "🟡"], "sinal": "🔵"},
-    {"id": 45, "sequencia": ["🔵", "🟡", "🟡"], "sinal": "🔵"},
-    {"id": 46, "sequencia": ["🔴", "🟡", "🟡"], "sinal": "🔴"},
-    {"id": 1, "sequencia": ["🔵", "🔴", "🔵", "🔴"], "sinal": "🔵"},
-    {"id": 2, "sequencia": ["🔴", "🔴", "🔴", "🔴", "🔴"], "sinal": "🔴"},
-    {"id": 3, "sequencia": ["🔵", "🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
-    {"id": 4, "sequencia": ["🔴", "🔴", "🔵", "🔵"], "sinal": "🔴"},
-    {"id": 5, "sequencia": ["🔴", "🔵", "🔴", "🔵"], "sinal": "🔴"},
-    {"id": 6, "sequencia": ["🔴", "🔴", "🔴", "🔴", "🔵"], "sinal": "🔵"},
-    {"id": 7, "sequencia": ["🔵", "🔵", "🔵", "🔵", "🔴"], "sinal": "🔴"},
-    {"id": 8, "sequencia": ["🔴", "🔵", "🔴", "🔵", "🔴"], "sinal": "🔵"},
-    {"id": 9, "sequencia": ["🔵", "🔴", "🔵", "🔴", "🔵"], "sinal": "🔴"},
-    {"id": 249, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
-    {"id": 150, "sequencia": ["🔵", "🔴", "🔴", "🔵"], "sinal": "🔵"},
-    {"id": 420, "sequencia": ["🔴", "🟡", "🔴"], "sinal": "🔴"},
-    {"id": 424, "sequencia": ["🔵", "🟡", "🔵"], "sinal": "🔵"},
-    {"id": 525, "sequencia": ["🔴", "🔴", "🔴", "🔵"], "sinal": "🔵"},
-    {"id": 526, "sequencia": ["🔵", "🔵", "🔵", "🔴"], "sinal": "🔴"}
+    {"id": 101, "sequencia": ["🔵","🔵","🔵"], "sinal": "🔵"},
+    {"id": 102, "sequencia": ["🔴","🔴","🔴"], "sinal": "🔴"},
+    {"id": 103, "sequencia": ["🔵","🔵","🔵","🔵"], "sinal": "🔴"},
+    {"id": 104, "sequencia": ["🔴","🔴","🔴","🔴"], "sinal": "🔵"},
+    {"id": 201, "sequencia": ["🔵","🔴","🔵"], "sinal": "🔴"},
+    {"id": 202, "sequencia": ["🔴","🔵","🔴"], "sinal": "🔵"},
+    {"id": 203, "sequencia": ["🔵","🔴","🔵","🔴"], "sinal": "🔵"},
+    {"id": 204, "sequencia": ["🔴","🔵","🔴","🔵"], "sinal": "🔴"},
+    {"id": 301, "sequencia": ["🔵","🔵","🔴"], "sinal": "🔵"},
+    {"id": 302, "sequencia": ["🔴","🔴","🔵"], "sinal": "🔴"},
+    {"id": 303, "sequencia": ["🔵","🔵","🔴","🔴"], "sinal": "🔵"},
+    {"id": 304, "sequencia": ["🔴","🔴","🔵","🔵"], "sinal": "🔴"},
+    {"id": 401, "sequencia": ["🔵","🔵","🔵","🔴"], "sinal": "🔵"},
+    {"id": 402, "sequencia": ["🔴","🔴","🔴","🔵"], "sinal": "🔴"},
+    {"id": 403, "sequencia": ["🔵","🔵","🔵","🔴","🔴"], "sinal": "🔵"},
+    {"id": 404, "sequencia": ["🔴","🔴","🔴","🔵","🔵"], "sinal": "🔴"},
+    {"id": 501, "sequencia": ["🔵","🟡","🔵"], "sinal": "🔴"},
+    {"id": 502, "sequencia": ["🔴","🟡","🔴"], "sinal": "🔵"},
+    {"id": 503, "sequencia": ["🟡","🔵","🟡"], "sinal": "🔵"},
+    {"id": 504, "sequencia": ["🟡","🔴","🟡"], "sinal": "🔴"},
+    {"id": 505, "sequencia": ["🔵","🔵","🟡"], "sinal": "🔵"},
+    {"id": 506, "sequencia": ["🔴","🔴","🟡"], "sinal": "🔴"},
+    {"id": 601, "sequencia": ["🔵","🔵","🔵","🔵","🔴"], "sinal": "🔵"},
+    {"id": 602, "sequencia": ["🔴","🔴","🔴","🔴","🔵"], "sinal": "🔴"},
+    {"id": 603, "sequencia": ["🔵","🔵","🔵","🔴","🔴"], "sinal": "🔵"},
+    {"id": 604, "sequencia": ["🔴","🔴","🔴","🔵","🔵"], "sinal": "🔴"},
+    {"id": 701, "sequencia": ["🔵","🔴","🔵","🔴","🔵"], "sinal": "🔴"},
+    {"id": 702, "sequencia": ["🔴","🔵","🔴","🔵","🔴"], "sinal": "🔵"},
+    {"id": 801, "sequencia": ["🔵","🔴","🔴","🔵"], "sinal": "🔴"},
+    {"id": 802, "sequencia": ["🔴","🔵","🔵","🔴"], "sinal": "🔵"},
+    {"id": 803, "sequencia": ["🔵","🔵","🔴","🔵","🔴"], "sinal": "🔵"},
+    {"id": 804, "sequencia": ["🔴","🔴","🔵","🔴","🔵"], "sinal": "🔴"},
+    {"id": 805, "sequencia": ["🔵","🟡","🔴","🔵"], "sinal": "🔴"},
+    {"id": 806, "sequencia": ["🔴","🟡","🔵","🔴"], "sinal": "🔵"},
+    {"id": 901, "sequencia": ["🔵","🔵","🔴","🔴","🔵"], "sinal": "🔵"},
+    {"id": 902, "sequencia": ["🔴","🔴","🔵","🔵","🔴"], "sinal": "🔴"},
+    {"id": 903, "sequencia": ["🔵","🔴","🔵","🔵","🔴"], "sinal": "🔵"},
+    {"id": 904, "sequencia": ["🔴","🔵","🔴","🔴","🔵"], "sinal": "🔴"},
+    {"id": 905, "sequencia": ["🔵","🔵","🔵","🟡","🔵"], "sinal": "🔵"},
+    {"id": 906, "sequencia": ["🔴","🔴","🔴","🟡","🔴"], "sinal": "🔴"},
+    {"id": 907, "sequencia": ["🟡","🔵","🔵"], "sinal": "🔴"},
+    {"id": 908, "sequencia": ["🟡","🔴","🔴"], "sinal": "🔵"},
+    {"id": 909, "sequencia": ["🔵","🔴","🟡","🔵"], "sinal": "🔴"},
+    {"id": 910, "sequencia": ["🔴","🔵","🟡","🔴"], "sinal": "🔵"},
+    {"id": 911, "sequencia": ["🔵","🔵","🔴","🟡"], "sinal": "🔵"},
+    {"id": 912, "sequencia": ["🔴","🔴","🔵","🟡"], "sinal": "🔴"},
+    {"id": 913, "sequencia": ["🔵","🟡","🔵","🔵"], "sinal": "🔴"},
+    {"id": 914, "sequencia": ["🔴","🟡","🔴","🔴"], "sinal": "🔵"},
+    {"id": 915, "sequencia": ["🟡","🟡","🔵"], "sinal": "🔴"},
+    {"id": 916, "sequencia": ["🟡","🟡","🔴"], "sinal": "🔵"},
 ]
 
 API_POLL_INTERVAL = 3
@@ -256,15 +266,11 @@ def main_entry_text(color: str) -> str:
         f"💡 <b>CLEVER ANALISOU</b> 💡\n"
         f"🧠 APOSTA EM: <b>{emoji} {cor_nome}</b>\n"
         f"🛡️ Proteja o TIE <b>🟡</b>\n"
-        f"<b>FAZER ATÉ 1 GALE</b>\n"
+        f"<b>FAZER ATÉ 2 GALE</b>\n"
         f"🤑 <b>VAI ENTRAR DINHEIRO</b> 🤑"
     )
 
-def martingale_text(color: str) -> str:
-    return f"➡️ <b>Vamos para o 1º GALE</b>\n🎯 Alvo: {color}"
-
 def green_text(greens: int) -> str:
-    # Removida completamente a parte de sequência de vitórias
     return (
         f"🤡 <b>ENTROU DINHEIRO</b> 🤡\n"
         f"🎲 <b>CLEVER_M</b> 🎲"
@@ -288,9 +294,6 @@ async def resolve_after_result():
     state["last_result_round_id"] = state["last_round_id"]
     target = state["last_signal_color"]
 
-    await delete_messages(state.get("martingale_message_ids", []))
-    state["martingale_message_ids"] = []
-
     placar_text = format_placar()
 
     if last_outcome == "🟡":  # Empate
@@ -307,14 +310,13 @@ async def resolve_after_result():
             "last_signal_round_id": None,
             "signal_cooldown": True
         })
+        return
 
-    elif last_outcome == target:  # Green
+    if last_outcome == target:  # Green
         state["greens_seguidos"] += 1
         state["total_greens"] += 1
         await send_to_channel(green_text(state["greens_seguidos"]))
         await send_to_channel(placar_text)
-        # → removida a mensagem extra de sequência de vitórias
-
         state.update({
             "waiting_for_result": False,
             "last_signal_color": None,
@@ -324,28 +326,26 @@ async def resolve_after_result():
             "last_signal_round_id": None,
             "signal_cooldown": True
         })
+        return
 
-    else:  # Loss ou preparação para gale
-        if state.get("martingale_count", 0) == 0:
-            state["martingale_count"] = 1
-            msg_id = await send_to_channel(martingale_text(target))
-            if msg_id:
-                state["martingale_message_ids"] = [msg_id]
-            return
-        else:
-            state["greens_seguidos"] = 0
-            state["total_losses"] += 1
-            await send_to_channel("🟥 <b>LOSS 🟥</b>")
-            await send_to_channel(placar_text)
-            state.update({
-                "waiting_for_result": False,
-                "last_signal_color": None,
-                "martingale_count": 0,
-                "last_signal_pattern_id": None,
-                "last_signal_sequence": None,
-                "last_signal_round_id": None,
-                "signal_cooldown": True
-            })
+    # Errou → avança no martingale
+    state["martingale_count"] += 1
+
+    if state["martingale_count"] >= 2:  # Perdeu os 2 gales
+        state["greens_seguidos"] = 0
+        state["total_losses"] += 1
+        await send_to_channel("🟥 <b>LOSS 🟥</b>")
+        await send_to_channel(placar_text)
+        state.update({
+            "waiting_for_result": False,
+            "last_signal_color": None,
+            "martingale_count": 0,
+            "last_signal_pattern_id": None,
+            "last_signal_sequence": None,
+            "last_signal_round_id": None,
+            "signal_cooldown": True
+        })
+    # Se martingale_count == 1 → continua esperando (está no 2º gale, sem aviso)
 
     reset_placar_if_needed()
     await refresh_analise_message()
@@ -377,7 +377,6 @@ async def try_send_signal():
         return
 
     await delete_analise_message()
-    await delete_messages(state["martingale_message_ids"])
     state["martingale_message_ids"] = []
 
     msg_id = await send_to_channel(main_entry_text(color))
