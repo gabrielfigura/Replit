@@ -36,23 +36,47 @@ OUTCOME_MAP = {
 }
 
 PADROES = [
-    {"id": 101, "sequencia": ["🔵","🔵","🔵"],       "sinal": "🔵"},
-    {"id": 102, "sequencia": ["🔴","🔴","🔴"],       "sinal": "🔴"},
-    {"id": 201, "sequencia": ["🔵","🔴","🔵"],       "sinal": "🔴"},
-    {"id": 202, "sequencia": ["🔴","🔵","🔴"],       "sinal": "🔵"},
-    {"id": 301, "sequencia": ["🔵","🔴","🔵","🔴"], "sinal": "🔵"},
-    {"id": 302, "sequencia": ["🔴","🔵","🔴","🔵"], "sinal": "🔴"},
-    {"id": 401, "sequencia": ["🔵","🔵","🔴"],       "sinal": "🔵"},
-    {"id": 402, "sequencia": ["🔴","🔴","🔵"],       "sinal": "🔴"},
-    {"id": 501, "sequencia": ["🔵","🔵","🔵","🔴"], "sinal": "🔵"},
-    {"id": 502, "sequencia": ["🔴","🔴","🔴","🔵"], "sinal": "🔴"},
-    {"id": 601, "sequencia": ["🔵","🔵","🔵"],       "sinal": "🔴"},
-    {"id": 602, "sequencia": ["🔴","🔴","🔴"],       "sinal": "🔵"},
-    {"id": 701, "sequencia": ["🔵","🔵","🔵","🔵"], "sinal": "🔵"},
-    {"id": 702, "sequencia": ["🔴","🔴","🔴","🔴"], "sinal": "🔴"},
-    # ... adicione os restantes padrões conforme necessário
-    {"id": 2091, "sequencia": ["🔵","🔴","🔴","🔴","🔴"],     "sinal": "🔵"},
-    {"id": 2092, "sequencia": ["🔴","🔵","🔵","🔵","🔵"],     "sinal": "🔴"},
+    {"id": 13, "sequencia": ["🔵", "🔵", "🔵", "🔴", "🔴", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 14, "sequencia": ["🔴", "🔴", "🔴", "🔵", "🔵", "🔴", "🔴"], "sinal": "🔵"},
+    {"id": 15, "sequencia": ["🔴", "🔴", "🟡"], "sinal": "🔴"},
+    {"id": 16, "sequencia": ["🔵", "🔵", "🟡"], "sinal": "🔵"},
+    {"id": 17, "sequencia": ["🔴", "🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 18, "sequencia": ["🔵", "🔵", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 19, "sequencia": ["🔴", "🔵", "🔴", "🔴"], "sinal": "🔵"},
+    {"id": 20, "sequencia": ["🔵", "🔴", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 21, "sequencia": ["🔵", "🔵", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 22, "sequencia": ["🔴", "🔴", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 23, "sequencia": ["🔵", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 24, "sequencia": ["🔴", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔵"},
+    {"id": 25, "sequencia": ["🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 26, "sequencia": ["🔴", "🔴", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 31, "sequencia": ["🔴", "🔴", "🔴"], "sinal": "🔵"},
+    {"id": 34, "sequencia": ["🔵", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 35, "sequencia": ["🔴", "🔴", "🟡"], "sinal": "🔴"},
+    {"id": 36, "sequencia": ["🔵", "🔵", "🟡"], "sinal": "🔵"},
+    {"id": 39, "sequencia": ["🔴", "🟡", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 40, "sequencia": ["🔵", "🟡", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 41, "sequencia": ["🔴", "🔵", "🟡", "🔴"], "sinal": "🔴"},
+    {"id": 42, "sequencia": ["🔵", "🔴", "🟡", "🔵"], "sinal": "🔵"},
+    {"id": 43, "sequencia": ["🔴", "🔴", "🔵", "🟡"], "sinal": "🔴"},
+    {"id": 44, "sequencia": ["🔵", "🔵", "🔴", "🟡"], "sinal": "🔵"},
+    {"id": 45, "sequencia": ["🔵", "🟡", "🟡"], "sinal": "🔵"},
+    {"id": 46, "sequencia": ["🔴", "🟡", "🟡"], "sinal": "🔴"},
+    {"id": 1, "sequencia": ["🔵", "🔴", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 2, "sequencia": ["🔴", "🔴", "🔴", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 3, "sequencia": ["🔵", "🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 4, "sequencia": ["🔴", "🔴", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 5, "sequencia": ["🔴", "🔵", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 6, "sequencia": ["🔴", "🔴", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 7, "sequencia": ["🔵", "🔵", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 8, "sequencia": ["🔴", "🔵", "🔴", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 9, "sequencia": ["🔵", "🔴", "🔵", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 249, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 150, "sequencia": ["🔵", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 420, "sequencia": ["🔴", "🟡", "🔴"], "sinal": "🔴"},
+    {"id": 424, "sequencia": ["🔵", "🟡", "🔵"], "sinal": "🔵"},
+    {"id": 525, "sequencia": ["🔴", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 526, "sequencia": ["🔵", "🔵", "🔵", "🔴"], "sinal": "🔴"}
 ]
 
 API_POLL_INTERVAL = 3
@@ -158,7 +182,6 @@ def format_analise_text() -> str:
     return (
         "🎲 <b>ANALISANDO...</b> 🎲\n\n"
         "<i>Aguarde o próximo sinal</i>\n\n"
-        f"{format_placar()}"
     )
 
 async def refresh_analise_message():
