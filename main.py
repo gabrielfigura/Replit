@@ -12,9 +12,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Configurações
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7703975421:AAG-CG5Who2xs4NlevJqB5TNvjjzeUEDz8o")
-TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "-1002859771274")  # ← CONFIRMA ESTE ID !!!
+# ────────────────────────────────────────────────
+#               CONFIGURAÇÕES – ALTERE AQUI
+# ────────────────────────────────────────────────
+
+TELEGRAM_BOT_TOKEN = os.getenv(
+    "TELEGRAM_BOT_TOKEN",
+    "7345209825:AAE54I0tSUEdomWNOVkdTOFDnvY7jKBC4o0"
+)
+
+# !!! MUITO IMPORTANTE !!!
+# Este ID está errado no seu log → "Chat not found"
+# Use @getidsbot ou @RawDataBot no Telegram para obter o ID correto do canal
+# Exemplo real de ID de canal/supergroup: -1001987654321
+TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "-1003683356410")  # ← MUDE PARA O ID REAL !!!
 
 API_URL = "https://api-cs.casino.org/svc-evolution-game-events/api/bacbo/latest"
 
@@ -35,7 +46,6 @@ OUTCOME_MAP = {
     "🟡": "🟡",
 }
 
-# Lista de padrões (completa conforme enviaste antes)
 PADROES = [
     {"id": 101, "sequencia": ["🔵","🔵","🔵"],       "sinal": "🔵"},
     {"id": 102, "sequencia": ["🔴","🔴","🔴"],       "sinal": "🔴"},
@@ -77,6 +87,7 @@ API_POLL_INTERVAL = 3
 SIGNAL_CYCLE_INTERVAL = 5
 ANALISE_REFRESH_INTERVAL = 15
 
+# Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)-5s | %(message)s'
@@ -107,6 +118,10 @@ state: Dict[str, Any] = {
     "last_result_round_id": None,
 }
 
+# ────────────────────────────────────────────────
+#               FUNÇÕES
+# ────────────────────────────────────────────────
+
 async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
     try:
         msg = await bot.send_message(
@@ -123,10 +138,12 @@ async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
         logger.exception("Erro ao enviar mensagem")
         return None
 
+
 async def send_error_to_channel(error_msg: str):
     timestamp = datetime.now(ANGOLA_TZ).strftime("%Y-%m-%d %H:%M:%S")
     text = f"⚠️ <b>ERRO DETECTADO</b> ⚠️\n<code>{timestamp}</code>\n\n{error_msg}"
     await send_to_channel(text)
+
 
 async def delete_messages(message_ids: List[int]):
     if not message_ids:
@@ -136,6 +153,7 @@ async def delete_messages(message_ids: List[int]):
             await bot.delete_message(TELEGRAM_CHANNEL_ID, mid)
         except:
             pass
+
 
 def should_reset_placar() -> bool:
     now = datetime.now(ANGOLA_TZ)
@@ -147,6 +165,7 @@ def should_reset_placar() -> bool:
         return True
     return False
 
+
 def reset_placar_if_needed():
     if should_reset_placar():
         state["total_greens"] = 0
@@ -155,12 +174,14 @@ def reset_placar_if_needed():
         state["greens_seguidos"] = 0
         logger.info("🔄 Placar resetado (diário ou por 10 losses)")
 
+
 def calcular_acertividade() -> str:
     total_decisoes = state["total_greens"] + state["total_losses"]
     if total_decisoes == 0:
         return "—"
     perc = (state["total_greens"] / total_decisoes) * 100
     return f"{perc:.1f}%"
+
 
 def format_placar() -> str:
     acert = calcular_acertividade()
@@ -172,6 +193,7 @@ def format_placar() -> str:
         f"🎯 ACERTIVIDADE: <b>{acert}</b>"
     )
 
+
 def format_analise_text() -> str:
     return (
         "🔍 <b>ANALISANDO...</b> 🔍\n\n"
@@ -179,20 +201,24 @@ def format_analise_text() -> str:
         f"{format_placar()}"
     )
 
+
 async def refresh_analise_message():
     now = datetime.now().timestamp()
     if (now - state["last_analise_refresh"]) < ANALISE_REFRESH_INTERVAL:
         return
+
     await delete_analise_message()
     msg_id = await send_to_channel(format_analise_text())
     if msg_id:
         state["analise_message_id"] = msg_id
         state["last_analise_refresh"] = now
 
+
 async def delete_analise_message():
     if state["analise_message_id"] is not None:
         await delete_messages([state["analise_message_id"]])
         state["analise_message_id"] = None
+
 
 async def fetch_api(session: aiohttp.ClientSession) -> Optional[Dict]:
     try:
@@ -205,24 +231,29 @@ async def fetch_api(session: aiohttp.ClientSession) -> Optional[Dict]:
         await send_error_to_channel(f"Erro na API: {str(e)}")
         return None
 
+
 async def update_history_from_api(session):
     reset_placar_if_needed()
     data = await fetch_api(session)
     if not data:
         return
+
     try:
         if "data" in data:
             data = data["data"]
         round_id = data.get("id")
         outcome_raw = (data.get("result") or {}).get("outcome")
+
         if not round_id or not outcome_raw:
             return
+
         outcome = OUTCOME_MAP.get(outcome_raw)
         if not outcome:
             s = str(outcome_raw).lower()
             if "player" in s: outcome = "🔵"
             elif "banker" in s: outcome = "🔴"
             elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
+
         if outcome and state["last_round_id"] != round_id:
             state["last_round_id"] = round_id
             state["history"].append(outcome)
@@ -230,18 +261,22 @@ async def update_history_from_api(session):
                 state["history"].pop(0)
             logger.info(f"Novo resultado → {outcome} | round {round_id}")
             state["signal_cooldown"] = False
+
     except Exception as e:
         await send_error_to_channel(f"Erro processando API: {str(e)}")
+
 
 def history_ends_with(history: List[str], seq: List[str]) -> bool:
     n = len(seq)
     return len(history) >= n and history[-n:] == seq
+
 
 def find_matching_pattern(history: List[str]) -> Optional[Dict]:
     for pat in PADROES:
         if history_ends_with(history, pat["sequencia"]):
             return pat
     return None
+
 
 def main_entry_text(color: str) -> str:
     cor_nome = "AZUL" if color == "🔵" else "VERMELHO"
@@ -255,12 +290,14 @@ def main_entry_text(color: str) -> str:
         f"{format_placar()}"
     )
 
+
 def martingale_text(color: str) -> str:
     return (
         f"➡️ <b>Vamos para o 1º GALE</b>\n"
         f"🎯 Alvo: {color}\n"
         f"{format_placar()}"
     )
+
 
 def green_text(greens: int) -> str:
     if greens <= 1:
@@ -276,21 +313,29 @@ def green_text(greens: int) -> str:
             f"{format_placar()}"
         )
 
+
 async def resolve_after_result():
     if not state.get("waiting_for_result", False) or not state.get("last_signal_color"):
         return
+
     if state["last_result_round_id"] == state["last_round_id"]:
         return
+
     if not state["history"]:
         return
+
     last_outcome = state["history"][-1]
+
     if state["last_signal_round_id"] == state["last_round_id"]:
         return
+
     state["last_result_round_id"] = state["last_round_id"]
     target = state["last_signal_color"]
+
     await delete_messages(state.get("martingale_message_ids", []))
     state["martingale_message_ids"] = []
-    if last_outcome == "🟡":
+
+    if last_outcome == "🟡":  # Empate
         state["greens_seguidos"] += 1
         state["total_empates"] += 1
         await send_to_channel(green_text(state["greens_seguidos"]))
@@ -306,7 +351,8 @@ async def resolve_after_result():
             "signal_cooldown": True
         })
         return
-    if last_outcome == target:
+
+    if last_outcome == target:  # Green
         state["greens_seguidos"] += 1
         state["total_greens"] += 1
         await send_to_channel(green_text(state["greens_seguidos"]))
@@ -322,6 +368,8 @@ async def resolve_after_result():
             "signal_cooldown": True
         })
         return
+
+    # Martingale ou Loss
     if state.get("martingale_count", 0) == 0:
         state["martingale_count"] = 1
         msg_id = await send_to_channel(martingale_text(target))
@@ -342,31 +390,40 @@ async def resolve_after_result():
             "last_signal_round_id": None,
             "signal_cooldown": True
         })
+
     reset_placar_if_needed()
+
 
 async def try_send_signal():
     if state["waiting_for_result"]:
         await delete_analise_message()
         return
+
     if state["signal_cooldown"]:
         await refresh_analise_message()
         return
+
     if len(state["history"]) < 3:
         await refresh_analise_message()
         return
+
     pat = find_matching_pattern(state["history"])
     if not pat:
         await refresh_analise_message()
         return
+
     color = pat["sinal"]
     seq = state["history"][-len(pat["sequencia"]):]
+
     if (state["last_signal_pattern_id"] == pat["id"] and 
         state["last_signal_sequence"] == seq):
         await refresh_analise_message()
         return
+
     await delete_analise_message()
     await delete_messages(state["martingale_message_ids"])
     state["martingale_message_ids"] = []
+
     msg_id = await send_to_channel(main_entry_text(color))
     if msg_id:
         state["entrada_message_id"] = msg_id
@@ -377,6 +434,7 @@ async def try_send_signal():
         state["last_signal_sequence"] = seq
         state["last_signal_round_id"] = state["last_round_id"]
         logger.info(f"Sinal enviado: {color}")
+
 
 async def api_worker():
     async with aiohttp.ClientSession() as session:
@@ -390,6 +448,7 @@ async def api_worker():
                 await asyncio.sleep(10)
             await asyncio.sleep(API_POLL_INTERVAL)
 
+
 async def scheduler_worker():
     await asyncio.sleep(3)
     while True:
@@ -401,10 +460,16 @@ async def scheduler_worker():
             await send_error_to_channel(f"Erro no envio de sinais:\n<code>{str(e)}</code>")
         await asyncio.sleep(SIGNAL_CYCLE_INTERVAL)
 
+
 async def main():
     logger.info("🤖 Bot iniciado...")
     await send_to_channel("🤖 Bot iniciado - procurando sinais...")
     await asyncio.gather(api_worker(), scheduler_worker())
+
+
+# ────────────────────────────────────────────────
+#               EXECUÇÃO
+# ────────────────────────────────────────────────
 
 if __name__ == "__main__":
     try:
@@ -413,8 +478,7 @@ if __name__ == "__main__":
         logger.info("Bot parado pelo usuário")
     except Exception as e:
         logger.critical("Erro fatal", exc_info=True)
-        # Tenta enviar mesmo com erro (pode falhar se chat não existir)
         try:
             asyncio.run(send_error_to_channel(f"ERRO FATAL: {str(e)}"))
-        except:
-            pass
+        except Exception:
+            pass  # evita crash extra se Telegram falhar
