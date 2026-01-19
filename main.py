@@ -52,7 +52,7 @@ logger = logging.getLogger("BacBoBot")
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 state: Dict[str, Any] = {
-    "history": [],                          # guarda 🔵 🔴 🟡
+    "history": [],
     "last_round_id": None,
     "waiting_for_result": False,
     "last_signal_color": None,
