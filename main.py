@@ -49,18 +49,19 @@ logger = logging.getLogger("BacBoBot")
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 state: Dict[str, Any] = {
-    "history": [],                          # agora guarda 🔵 🔴 🟡
+    "history": [],                          # guarda 🔵 🔴 🟡
     "last_round_id": None,
     "waiting_for_result": False,
     "last_signal_color": None,
     "martingale_count": 0,
     "entrada_message_id": None,
     "martingale_message_ids": [],
-    "greens_seguidos": 0,
-    "total_greens": 0,
-    "total_empates": 0,
+    "sg_count": 0,                          # Sem Gale
+    "g1_count": 0,                          # 1 Gale
+    "g2_count": 0,                          # 2 Gale
     "total_losses": 0,
-    "last_signal_pattern": None,            # agora guarda o nome da estratégia
+    "total_empates": 0,                     # apenas controle
+    "last_signal_pattern": None,
     "last_signal_sequence": None,
     "last_signal_round_id": None,
     "signal_cooldown": False,
@@ -68,7 +69,7 @@ state: Dict[str, Any] = {
     "last_reset_date": None,
     "last_analise_refresh": 0.0,
     "last_result_round_id": None,
-    "player_score_last": None,              # para estratégia de paridade
+    "player_score_last": None,
     "banker_score_last": None,
 }
 
@@ -114,33 +115,28 @@ def should_reset_placar() -> bool:
 
 def reset_placar_if_needed():
     if should_reset_placar():
-        state["total_greens"] = 0
-        state["total_empates"] = 0
+        state["sg_count"] = 0
+        state["g1_count"] = 0
+        state["g2_count"] = 0
         state["total_losses"] = 0
-        state["greens_seguidos"] = 0
+        state["total_empates"] = 0
         logger.info("🔄 Placar resetado (diário ou por 10 losses)")
 
-def calcular_acertividade() -> str:
-    total_decisoes = state["total_greens"] + state["total_losses"]
-    if total_decisoes == 0:
-        return "—"
-    perc = (state["total_greens"] / total_decisoes) * 100
-    return f"{perc:.1f}%"
-
 def format_placar() -> str:
-    acert = calcular_acertividade()
     return (
-        "🏆 <b>PLACAR DO DIA</b> 🏆\n"
-        f"✅ GREENS: <b>{state['total_greens']}</b>\n"
-        f"🤝 EMPATES: {state['total_empates']}\n"
-        f"⛔ LOSS: <b>{state['total_losses']}</b>\n"
-        f"🎯 ACERTIVIDADE: <b>{acert}</b>"
+        "🏆 <b>PLACAR DO DIA</b> 🏆\n\n"
+        f"✅ TOTAL DE GANHOS: <b>{state['sg_count'] + state['g1_count'] + state['g2_count']}</b>\n"
+        f"🤡 SG: <b>{state['sg_count']}</b>  (sem gale)\n"
+        f"🤡 G1: <b>{state['g1_count']}</b>  (1 gale)\n"
+        f"🤡 G2: <b>{state['g2_count']}</b>  (2 gale)\n"
+        f"❌ LOSS: <b>{state['total_losses']}</b>"
     )
 
 def format_analise_text() -> str:
     return (
         "🎲 <b>ANALISANDO...</b> 🎲\n\n"
-        "<i>Aguarde o próximo sinal</i>"
+        "<i>Aguarde o próximo sinal</i>\n"
+        "<i>(estratégia ultra restritiva)</i>"
     )
 
 async def refresh_analise_message():
@@ -183,7 +179,6 @@ async def update_history_from_api(session):
         player_dice = None
         banker_dice = None
 
-        # Tentativa de capturar scores (paridade)
         result = data.get("result") or {}
         if isinstance(result, dict):
             pl = result.get("player") or result.get("playerDice") or {}
@@ -216,79 +211,108 @@ async def update_history_from_api(session):
         await send_error_to_channel(f"Erro processando API: {str(e)}")
 
 # ────────────────────────────────────────────────
-#     LÓGICA DE ESTRATÉGIAS (adaptada do Messias Bot)
+#     ESTRATÉGIA ULTRA RESTRITIVA (máxima qualidade)
 # ────────────────────────────────────────────────
 
 def oposto(cor: str) -> str:
     return "🔵" if cor == "🔴" else "🔴"
 
-def estrategia_repeticao(hist: List[str]):
-    if len(hist) >= 3 and hist[-1] == hist[-2] == hist[-3] and hist[-1] in ("🔵", "🔴"):
-        return ("Repetição 3x", hist[-1])
-    if len(hist) >= 2 and hist[-1] == hist[-2] and hist[-1] in ("🔵", "🔴"):
-        return ("Repetição 2x", hist[-1])
-    return None
+def contar_ultimos_consecutivos(hist: List[str], cor: str) -> int:
+    cont = 0
+    for c in reversed(hist):
+        if c == cor:
+            cont += 1
+        elif c != "🟡":
+            break
+    return cont
 
-def estrategia_alternancia(hist: List[str]):
-    if len(hist) >= 4:
-        last4 = hist[-4:]
-        if all(x in ("🔵", "🔴") for x in last4) and last4[0] == last4[2] and last4[1] == last4[3] and last4[0] != last4[1]:
-            return ("Alternância ABAB", oposto(last4[-1]))
-    return None
+def muitos_empates_recentes(hist: List[str]) -> bool:
+    if len(hist) < 6:
+        return False
+    return hist[-6:].count("🟡") >= 4
 
-def estrategia_seq_empate(hist: List[str]):
-    if len(hist) >= 2 and hist[-2] == "🟡" and hist[-1] in ("🔵", "🔴"):
-        return ("Sequência de Tie", hist[-1])
-    return None
+def alternancia_muito_rapida(hist: List[str]) -> bool:
+    if len(hist) < 10:
+        return False
+    ult10 = hist[-10:]
+    trocas = sum(1 for a, b in zip(ult10, ult10[1:]) if a != b and a != "🟡" and b != "🟡")
+    return trocas >= 8
 
-def estrategia_ultima(hist: List[str]):
-    if len(hist) >= 1 and hist[-1] in ("🔵", "🔴"):
-        return ("Última vencedora", hist[-1])
-    return None
+def estrategia_ultra_restritiva(hist: List[str], player_score=None, banker_score=None):
+    if len(hist) < 8:
+        return None, None
 
-def estrategia_maj5(hist: List[str]):
-    window = [x for x in hist[-5:] if x in ("🔵", "🔴")]
-    if len(window) >= 3:
+    if muitos_empates_recentes(hist) or alternancia_muito_rapida(hist):
+        return None, None
+
+    ultimo = hist[-1]
+    if ultimo == "🟡":
+        return None, None
+
+    # ─── CONDIÇÃO PRINCIPAL (muito forte) ────────────────────────────────
+    padrao_forte = None
+
+    # 5 ou mais consecutivos → contra fluxo
+    if contar_ultimos_consecutivos(hist, ultimo) >= 5:
+        padrao_forte = ("5+ consecutivos", oposto(ultimo))
+
+    # 4 consecutivos + quebra + volta
+    elif len(hist) >= 6 and hist[-6:-2] == [ultimo]*4 and hist[-2] != ultimo and hist[-1] == ultimo:
+        padrao_forte = ("4 + quebra + volta", ultimo)
+
+    # Contra após 3 longas sequências diferentes
+    seqs = []
+    atual = None
+    cont = 0
+    for c in reversed([x for x in hist if x != "🟡"]):
+        if c == atual:
+            cont += 1
+        else:
+            if cont >= 3:
+                seqs.append((atual, cont))
+            atual = c
+            cont = 1
+        if len(seqs) >= 3:
+            break
+    if len(seqs) >= 3 and ultimo != seqs[0][0]:
+        padrao_forte = ("Contra 3 sequências fortes", oposto(ultimo))
+
+    if not padrao_forte:
+        return None, None
+
+    # ─── CONDIÇÃO DE CONFORMAÇÃO OBRIGATÓRIA ─────────────────────────────
+    confirmacao = None
+
+    # Paridade clara
+    if player_score is not None and banker_score is not None:
+        try:
+            ps = int(player_score)
+            bs = int(banker_score)
+            if ultimo == "🔵" and ps % 2 == 1 and bs % 2 == 0:
+                confirmacao = "Paridade P ímpar"
+            elif ultimo == "🔴" and bs % 2 == 1 and ps % 2 == 0:
+                confirmacao = "Paridade B ímpar"
+        except:
+            pass
+
+    # Maioria muito dominante (≥70% nas últimas 10 não-tie)
+    window = [x for x in hist[-12:] if x != "🟡"]
+    if len(window) >= 8:
         cnt = Counter(window)
-        most, _ = cnt.most_common(1)[0]
-        return ("Maioria 5", most)
-    return None
+        most, qtd = cnt.most_common(1)[0]
+        perc = qtd / len(window)
+        if perc >= 0.70 and ultimo == most:
+            confirmacao = confirmacao or "Maioria ≥70%"
 
-def estrategia_paridade(player_score, banker_score):
-    if player_score is None or banker_score is None:
-        return None
-    try:
-        ps = int(player_score)
-        bs = int(banker_score)
-        if ps % 2 == 1 and bs % 2 == 0:
-            return ("Paridade", "🔵")
-        if bs % 2 == 1 and ps % 2 == 0:
-            return ("Paridade", "🔴")
-    except:
-        pass
-    return None
+    if not confirmacao:
+        return None, None
+
+    # Só entra se AMBAS condições fortes forem atendidas
+    nome = f"{padrao_forte[0]} + {confirmacao}"
+    return nome, padrao_forte[1]
 
 def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=None):
-    estrategias = [
-        estrategia_repeticao,
-        estrategia_alternancia,
-        estrategia_seq_empate,
-        estrategia_ultima,
-        estrategia_maj5,
-    ]
-
-    seen = set()
-    for func in estrategias:
-        res = func(history)
-        if res and res[1] not in seen:
-            seen.add(res[1])
-            return res  # (nome_estrategia, cor_sinal)
-
-    res_par = estrategia_paridade(player_score, banker_score)
-    if res_par and res_par[1] not in seen:
-        return res_par
-
-    return None, None
+    return estrategia_ultra_restritiva(history, player_score, banker_score)
 
 # ────────────────────────────────────────────────
 
@@ -303,10 +327,12 @@ def main_entry_text(color: str) -> str:
         f"🤑 <b>VAI ENTRAR DINHEIRO</b> 🤑"
     )
 
-def green_text(greens: int) -> str:
+def green_text() -> str:
+    total = state["sg_count"] + state["g1_count"] + state["g2_count"]
     return (
         f"🤡 <b>ENTROU DINHEIRO</b> 🤡\n"
-        f"🎲 <b>MAIS FOCO E MENOS GANÂNCIA</b> 🎲"
+        f"Total greens hoje: <b>{total}</b>\n"
+        f"🎲 <b>Foco total – sem ganância</b> 🎲"
     )
 
 async def send_gale_warning(level: int):
@@ -333,24 +359,24 @@ async def resolve_after_result():
 
     last_outcome = state["history"][-1]
 
-    if state["last_signal_round_id"] == state["last_round_id"]:
-        return
-
     state["last_result_round_id"] = state["last_round_id"]
     target = state["last_signal_color"]
 
-    placar_text = format_placar()
+    if last_outcome == "🟡":
+        state["total_empates"] += 1
+        # Empate → mantém entrada ativa
+        return
 
-    if last_outcome in ("🟡", target):
-        if last_outcome == "🟡":
-            state["total_empates"] += 1
-            state["greens_seguidos"] = 0
-        else:
-            state["greens_seguidos"] += 1
-            state["total_greens"] += 1
+    if last_outcome == target:
+        if state["martingale_count"] == 0:
+            state["sg_count"] += 1
+        elif state["martingale_count"] == 1:
+            state["g1_count"] += 1
+        elif state["martingale_count"] == 2:
+            state["g2_count"] += 1
 
-        await send_to_channel(green_text(state["greens_seguidos"]))
-        await send_to_channel(placar_text)
+        await send_to_channel(green_text())
+        await send_to_channel(format_placar())
 
         await clear_gale_messages()
 
@@ -366,6 +392,7 @@ async def resolve_after_result():
         })
         return
 
+    # Perdeu → gale
     state["martingale_count"] += 1
 
     if state["martingale_count"] == 1:
@@ -374,10 +401,9 @@ async def resolve_after_result():
         await send_gale_warning(2)
 
     if state["martingale_count"] >= 3:
-        state["greens_seguidos"] = 0
         state["total_losses"] += 1
         await send_to_channel("🟥 <b>LOSS 🟥</b>")
-        await send_to_channel(placar_text)
+        await send_to_channel(format_placar())
 
         await clear_gale_messages()
 
@@ -404,7 +430,7 @@ async def try_send_signal():
         await refresh_analise_message()
         return
 
-    if len(state["history"]) < 2:  # várias estratégias precisam de pelo menos 2–5 resultados
+    if len(state["history"]) < 8:
         await refresh_analise_message()
         return
 
@@ -418,8 +444,8 @@ async def try_send_signal():
         await refresh_analise_message()
         return
 
-    # Evita repetir o mesmo padrão/sequência imediatamente
-    seq_str = "".join(state["history"][-6:])  # janela razoável
+    # Evita repetir o mesmo sinal na mesma sequência
+    seq_str = "".join(state["history"][-10:])
     if state["last_signal_pattern"] == padrao and state["last_signal_sequence"] == seq_str:
         await refresh_analise_message()
         return
@@ -463,7 +489,7 @@ async def scheduler_worker():
 
 async def main():
     logger.info("🤖 Bot iniciado...")
-    await send_to_channel("🤖 Bot iniciado - procurando sinais...")
+    await send_to_channel("🤖 Bot iniciado – estratégia ultra restritiva ativa")
     await asyncio.gather(api_worker(), scheduler_worker())
 
 if __name__ == "__main__":
