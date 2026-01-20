@@ -58,6 +58,9 @@ state: Dict[str, Any] = {
     "martingale_message_ids": [],
     "greens_seguidos": 0,
     "total_greens": 0,
+    "greens_sem_gale": 0,
+    "greens_gale_1": 0,
+    "greens_gale_2": 0,
     "total_empates": 0,
     "total_losses": 0,
     "last_signal_pattern": None,
@@ -115,6 +118,9 @@ def should_reset_placar() -> bool:
 def reset_placar_if_needed():
     if should_reset_placar():
         state["total_greens"] = 0
+        state["greens_sem_gale"] = 0
+        state["greens_gale_1"] = 0
+        state["greens_gale_2"] = 0
         state["total_empates"] = 0
         state["total_losses"] = 0
         state["greens_seguidos"] = 0
@@ -131,10 +137,14 @@ def format_placar() -> str:
     acert = calcular_acertividade()
     return (
         "🏆 <b>RESUMO</b> 🏆\n"
-        f"✅ VITÓRIAS COM CLEVER: <b>{state['total_greens']}</b>\n"
-        f"🤝 EMPATES: {state['total_empates']}\n"
-        f"⛔ LOSS: <b>{state['total_losses']}</b>\n"
-        f"🎯 ACERTIVIDADE: <b>{acert}</b>"
+        f"✅ Ganhos sem gale:    <b>{state['greens_sem_gale']}</b>\n"
+        f"🔄 Ganhos gale 1:       <b>{state['greens_gale_1']}</b>\n"
+        f"🔄 Ganhos gale 2:       <b>{state['greens_gale_2']}</b>\n"
+        f"🤝 Total empates:       <b>{state['total_empates']}</b>\n"
+        f"⛔ Losses reais:        <b>{state['total_losses']}</b>\n"
+        f"─────────────────────────────\n"
+        f"🎯 Total greens:        <b>{state['total_greens']}</b>\n"
+        f"🎯 Acertividade:        <b>{acert}</b>"
     )
 
 def format_analise_text() -> str:
@@ -213,8 +223,6 @@ async def update_history_from_api(session):
             state["signal_cooldown"] = False
     except Exception as e:
         await send_error_to_channel(f"Erro processando API: {str(e)}")
-
-# LÓGICA DE ESTRATÉGIAS (mantida igual)
 
 def oposto(cor: str) -> str:
     return "🔵" if cor == "🔴" else "🔴"
@@ -335,23 +343,25 @@ async def resolve_after_result():
     state["last_result_round_id"] = state["last_round_id"]
     target = state["last_signal_color"]
 
-    placar_text = format_placar()
+    acertou = (last_outcome == target)
+    is_tie = (last_outcome == "🟡")
 
-    # Lógica alterada: empate (🟡) agora conta como GREEN
-    is_green = (last_outcome == target) or (last_outcome == "🟡")
-
-    if is_green:
-        # Green ou Empate → conta como ganho
-        state["greens_seguidos"] += 1
+    if acertou:
+        # Acerto real (cor correta) → incrementa a categoria correspondente
         state["total_greens"] += 1
-        # Empates continuam sendo contados separadamente se quiser manter a estatística
-        if last_outcome == "🟡":
-            state["total_empates"] += 1
+        state["greens_seguidos"] += 1
+
+        if state["martingale_count"] == 0:
+            state["greens_sem_gale"] += 1
+        elif state["martingale_count"] == 1:
+            state["greens_gale_1"] += 1
+        elif state["martingale_count"] == 2:
+            state["greens_gale_2"] += 1
 
         await send_to_channel(green_text(state["greens_seguidos"]))
-        await send_to_channel(placar_text)
+        await send_to_channel(format_placar())
 
-        seq_text = f"ESTAMOS NUMA SEQUÊNCIA DE {state['greens_seguidos']} GANHOS SEGUIDOS🔥"
+        seq_text = f"ESTAMOS NUMA SEQUÊNCIA DE {state['greens_seguidos']} GANHOS SEGUIDOS 🔥"
         await send_to_channel(seq_text)
 
         await clear_gale_messages()
@@ -368,7 +378,33 @@ async def resolve_after_result():
         })
         return
 
-    # Se chegou aqui → loss real (contrário ao sinal e não foi empate)
+    if is_tie:
+        # Empate → só aumenta empates e total greens (não entra nas categorias de gale/sem gale)
+        state["total_greens"] += 1
+        state["total_empates"] += 1
+        state["greens_seguidos"] += 1
+
+        await send_to_channel(green_text(state["greens_seguidos"]))
+        await send_to_channel(format_placar())
+
+        seq_text = f"ESTAMOS NUMA SEQUÊNCIA DE {state['greens_seguidos']} GANHOS SEGUIDOS 🔥"
+        await send_to_channel(seq_text)
+
+        await clear_gale_messages()
+
+        state.update({
+            "waiting_for_result": False,
+            "last_signal_color": None,
+            "martingale_count": 0,
+            "entrada_message_id": None,
+            "last_signal_pattern": None,
+            "last_signal_sequence": None,
+            "last_signal_round_id": None,
+            "signal_cooldown": True
+        })
+        return
+
+    # Perda real nessa tentativa
     state["martingale_count"] += 1
 
     if state["martingale_count"] == 1:
@@ -379,8 +415,9 @@ async def resolve_after_result():
     if state["martingale_count"] >= 3:
         state["greens_seguidos"] = 0
         state["total_losses"] += 1
+
         await send_to_channel("🟥 <b>LOSS 🟥</b>")
-        await send_to_channel(placar_text)
+        await send_to_channel(format_placar())
 
         await clear_gale_messages()
 
@@ -397,8 +434,6 @@ async def resolve_after_result():
 
     reset_placar_if_needed()
     await refresh_analise_message()
-
-# O restante do código permanece igual (try_send_signal, api_worker, scheduler_worker, main, etc.)
 
 async def try_send_signal():
     if state["waiting_for_result"]:
