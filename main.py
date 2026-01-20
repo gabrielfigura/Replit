@@ -6,9 +6,6 @@ from datetime import datetime
 import pytz
 from collections import Counter
 
-import numpy as np
-from scipy import stats
-
 import aiohttp
 from telegram import Bot
 from telegram.error import TelegramError
@@ -31,12 +28,12 @@ HEADERS = {
 ANGOLA_TZ = pytz.timezone('Africa/Luanda')
 
 OUTCOME_MAP = {
-    "PlayerWon": "🔵",
-    "BankerWon": "🔴",
-    "Tie": "🟡",
-    "🔵": "🔵",
-    "🔴": "🔴",
-    "🟡": "🟡",
+    "PlayerWon": "Player",
+    "BankerWon": "Banker",
+    "Tie": "Tie",
+    "🔵": "Player",
+    "🔴": "Banker",
+    "🟡": "Tie",
 }
 
 API_POLL_INTERVAL = 3
@@ -52,7 +49,7 @@ logger = logging.getLogger("BacBoBot")
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 state: Dict[str, Any] = {
-    "history": [],
+    "history": [],                          # agora guarda "Player", "Banker", "Tie"
     "last_round_id": None,
     "waiting_for_result": False,
     "last_signal_color": None,
@@ -71,214 +68,65 @@ state: Dict[str, Any] = {
     "last_reset_date": None,
     "last_analise_refresh": 0.0,
     "last_result_round_id": None,
-    "player_score_last": None,
-    "banker_score_last": None,
 }
 
-# ────────────────────────────────────────────────
-#     ESTRATÉGIAS AVANÇADAS
-# ────────────────────────────────────────────────
+class BacBoAnalyzer:
+    def __init__(self):
+        self.history = []
 
-def calculate_pattern_correlation(history: List[str], window_size: int = 5) -> Dict[str, float]:
-    if len(history) < window_size * 2:
-        return {}
-    
-    color_map = {"🔵": 1, "🔴": -1, "🟡": 0}
-    numeric_history = [color_map.get(c, 0) for c in history]
-    
-    correlations = {}
-    for lag in range(1, min(window_size, len(numeric_history)//2)):
-        correlation = np.corrcoef(numeric_history[:-lag], numeric_history[lag:])[0, 1]
-        if not np.isnan(correlation):
-            correlations[f"lag_{lag}"] = correlation
-    
-    return correlations
+    def add_result(self, result: str):
+        if result in ("Player", "Banker", "Tie"):
+            self.history.append(result)
+        if len(self.history) > 200:
+            self.history.pop(0)
 
+    def get_recent_stats(self, window: int = 20) -> dict:
+        if len(self.history) < window:
+            window = len(self.history)
+        recent = self.history[-window:]
+        counts = Counter(recent)
+        return {
+            "Player": counts.get("Player", 0),
+            "Banker": counts.get("Banker", 0),
+            "Tie":    counts.get("Tie", 0),
+            "Total":  len(recent)
+        }
 
-def estrategia_correlacao(history: List[str]) -> Optional[Tuple[str, str]]:
-    correlations = calculate_pattern_correlation(history)
-    if not correlations:
-        return None
-    
-    strongest_lag = max(correlations, key=correlations.get, default=None)
-    if strongest_lag is None:
-        return None
-    
-    lag_value = int(strongest_lag.split("_")[1])
-    
-    if lag_value >= len(history):
-        return None
-    
-    predicted_value = history[-lag_value - 1]
-    if predicted_value in ("🔵", "🔴"):
-        confidence = abs(correlations[strongest_lag])
-        if confidence > 0.5:
-            return (f"Correlação (lag {lag_value})", predicted_value)
-    
-    return None
+    def predict(self) -> Tuple[Optional[str], str]:
+        """Estratégia principal: Frequency (melhor performance) + fallbacks"""
+        if len(self.history) < 8:
+            return None, "Histórico insuficiente"
 
+        stats = self.get_recent_stats(window=20)
+        total = stats["Total"]
+        if total == 0:
+            return None, "Sem dados"
 
-def estrategia_frequencia_bayesiana(history: List[str]) -> Optional[Tuple[str, str]]:
-    if len(history) < 10:
-        return None
-    
-    recent = history[-10:]
-    historic = history[:-10] if len(history) > 10 else []
-    
-    if not historic:
-        return None
-    
-    recent_counts = Counter(recent)
-    historic_counts = Counter(historic)
-    
-    bayes_probs = {}
-    for color in ["🔵", "🔴"]:
-        if color in recent_counts and color in historic_counts:
-            recent_prob = recent_counts[color] / len(recent)
-            historic_prob = historic_counts[color] / len(historic)
-            bayes_prob = recent_prob * 0.7 + historic_prob * 0.3
-            bayes_probs[color] = bayes_prob
-    
-    if bayes_probs:
-        best_color = max(bayes_probs, key=bayes_probs.get)
-        confidence = bayes_probs[best_color]
-        if confidence > 0.55:
-            return ("Frequência Bayesiana", best_color)
-    
-    return None
+        p_player = stats["Player"] / total
+        p_banker = stats["Banker"] / total
+        p_tie    = stats["Tie"]    / total
 
+        # Frequency: aposta no mais frequente (com proteção contra Tie fraco)
+        if p_player > p_banker and p_player > p_tie + 0.05:
+            return "Player", "Maioria Recente"
+        elif p_banker > p_player and p_banker > p_tie + 0.05:
+            return "Banker", "Maioria Recente"
 
-def estrategia_markov(history: List[str]) -> Optional[Tuple[str, str]]:
-    if len(history) < 6:
-        return None
-    
-    transitions = {}
-    
-    for i in range(len(history) - 2):
-        current_state = (history[i], history[i+1])
-        next_state = history[i+2]
-        
-        if current_state not in transitions:
-            transitions[current_state] = {"🔵": 0, "🔴": 0, "🟡": 0}
-        
-        transitions[current_state][next_state] += 1
-    
-    if len(history) < 2:
-        return None
-    
-    current_state = (history[-2], history[-1])
-    
-    if current_state in transitions:
-        next_probs = transitions[current_state]
-        total = sum(next_probs.values())
-        
-        if total > 0:
-            normalized_probs = {k: v/total for k, v in next_probs.items()}
-            
-            if normalized_probs.get("🟡", 0) < 0.2:
-                normalized_probs.pop("🟡", None)
-            
-            if normalized_probs:
-                best_next = max(normalized_probs, key=normalized_probs.get)
-                confidence = normalized_probs[best_next]
-                
-                if confidence > 0.5:
-                    return (f"Markov ({current_state[0]}{current_state[1]})", best_next)
-    
-    return None
+        # Fallback 1: Alternância / repetição
+        if len(self.history) >= 3:
+            last3 = self.history[-3:]
+            if last3[0] == last3[1] == last3[2] and last3[0] != "Tie":
+                opp = "Banker" if last3[0] == "Player" else "Player"
+                return opp, "Repetição 3x → Oposto"
 
+        # Fallback 2: Último vencedor não-tie
+        for r in reversed(self.history):
+            if r != "Tie":
+                return r, "Último Vencedor"
 
-def estrategia_ciclos_ondas(history: List[str]) -> Optional[Tuple[str, str]]:
-    if len(history) < 15:
-        return None
-    
-    color_map = {"🔵": 1, "🔴": -1, "🟡": 0}
-    numeric_history = [color_map.get(c, 0) for c in history]
-    
-    try:
-        window = min(5, len(numeric_history)//3)
-        if window < 2:
-            return None
-        
-        smoothed = []
-        for i in range(len(numeric_history) - window + 1):
-            smoothed.append(sum(numeric_history[i:i+window]) / window)
-        
-        peaks = []
-        valleys = []
-        
-        for i in range(1, len(smoothed) - 1):
-            if smoothed[i] > smoothed[i-1] and smoothed[i] > smoothed[i+1]:
-                peaks.append(i)
-            elif smoothed[i] < smoothed[i-1] and smoothed[i] < smoothed[i+1]:
-                valleys.append(i)
-        
-        if len(smoothed) > 0:
-            last_idx = len(smoothed) - 1
-            near_peak = any(abs(last_idx - p) <= 2 for p in peaks)
-            near_valley = any(abs(last_idx - v) <= 2 for v in valleys)
-            
-            if near_peak and len(history) > 0:
-                last_color = history[-1]
-                if last_color == "🔵":
-                    return ("Ondas (pico)", "🔴")
-                elif last_color == "🔴":
-                    return ("Ondas (pico)", "🔵")
-            
-            elif near_valley and len(history) > 0:
-                last_color = history[-1]
-                if last_color in ("🔵", "🔴"):
-                    return ("Ondas (vale)", last_color)
-    except Exception:
-        pass
-    
-    return None
+        return None, "Sem sinal claro"
 
-
-def estrategia_desvio_padrao(history: List[str]) -> Optional[Tuple[str, str]]:
-    if len(history) < 10:
-        return None
-    
-    color_map = {"🔵": 1, "🔴": -1, "🟡": 0}
-    numeric_history = [color_map.get(c, 0) for c in history]
-    
-    window = min(5, len(numeric_history)//2)
-    if window < 2:
-        return None
-    
-    recent_std = np.std(numeric_history[-window:])
-    historic_std = np.std(numeric_history[:-window]) if len(numeric_history) > window else 0
-    
-    if recent_std > 0 and historic_std > 0:
-        ratio = recent_std / historic_std
-        
-        if ratio > 1.5:
-            last_color = history[-1]
-            if last_color == "🔵":
-                return ("Desvio Padrão (alta vol)", "🔴")
-            elif last_color == "🔴":
-                return ("Desvio Padrão (alta vol)", "🔵")
-    
-    return None
-
-
-def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=None) -> Tuple[Optional[str], Optional[str]]:
-    estrategias = [
-        estrategia_correlacao,
-        estrategia_markov,
-        estrategia_frequencia_bayesiana,
-        estrategia_ciclos_ondas,
-        estrategia_desvio_padrao,
-    ]
-
-    for func in estrategias:
-        resultado = func(history)
-        if resultado is not None:
-            nome, cor = resultado
-            return nome, cor
-
-    return None, None
-
+analyzer = BacBoAnalyzer()
 
 # ────────────────────────────────────────────────
 #     FUNÇÕES DE INTERFACE E LÓGICA DO BOT
@@ -300,12 +148,10 @@ async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
         logger.exception("Erro ao enviar mensagem")
         return None
 
-
 async def send_error_to_channel(error_msg: str):
     timestamp = datetime.now(ANGOLA_TZ).strftime("%Y-%m-%d %H:%M:%S")
     text = f"⚠️ <b>ERRO DETECTADO</b> ⚠️\n<code>{timestamp}</code>\n\n{error_msg}"
     await send_to_channel(text)
-
 
 async def delete_messages(message_ids: List[int]):
     if not message_ids:
@@ -315,7 +161,6 @@ async def delete_messages(message_ids: List[int]):
             await bot.delete_message(TELEGRAM_CHANNEL_ID, mid)
         except:
             pass
-
 
 def should_reset_placar() -> bool:
     now = datetime.now(ANGOLA_TZ)
@@ -327,7 +172,6 @@ def should_reset_placar() -> bool:
         return True
     return False
 
-
 def reset_placar_if_needed():
     if should_reset_placar():
         state["total_greens"] = 0
@@ -336,14 +180,12 @@ def reset_placar_if_needed():
         state["greens_seguidos"] = 0
         logger.info("Placar resetado (diário ou por 10 losses)")
 
-
 def calcular_acertividade() -> str:
     total_decisoes = state["total_greens"] + state["total_losses"]
     if total_decisoes == 0:
         return "—"
     perc = (state["total_greens"] / total_decisoes) * 100
     return f"{perc:.1f}%"
-
 
 def format_placar() -> str:
     acert = calcular_acertividade()
@@ -355,13 +197,11 @@ def format_placar() -> str:
         f"🎯 ACERTIVIDADE: <b>{acert}</b>"
     )
 
-
 def format_analise_text() -> str:
     return (
         "🎲 <b>ANALISANDO...</b> 🎲\n\n"
         "<i>Aguarde o próximo sinal</i>"
     )
-
 
 async def refresh_analise_message():
     now = datetime.now().timestamp()
@@ -374,12 +214,10 @@ async def refresh_analise_message():
         state["analise_message_id"] = msg_id
         state["last_analise_refresh"] = now
 
-
 async def delete_analise_message():
     if state["analise_message_id"] is not None:
         await delete_messages([state["analise_message_id"]])
         state["analise_message_id"] = None
-
 
 async def fetch_api(session: aiohttp.ClientSession) -> Optional[Dict]:
     try:
@@ -392,7 +230,6 @@ async def fetch_api(session: aiohttp.ClientSession) -> Optional[Dict]:
         await send_error_to_channel(f"Erro na API: {str(e)}")
         return None
 
-
 async def update_history_from_api(session):
     reset_placar_if_needed()
     data = await fetch_api(session)
@@ -403,16 +240,6 @@ async def update_history_from_api(session):
             data = data["data"]
         round_id = data.get("id")
         outcome_raw = (data.get("result") or {}).get("outcome")
-        player_dice = None
-        banker_dice = None
-
-        result = data.get("result") or {}
-        if isinstance(result, dict):
-            pl = result.get("player") or result.get("playerDice") or {}
-            bk = result.get("banker") or result.get("bankerDice") or {}
-            for k in ("score", "sum", "total", "points"):
-                if k in pl: player_dice = pl[k]
-                if k in bk: banker_dice = bk[k]
 
         if not round_id or not outcome_raw:
             return
@@ -420,23 +247,20 @@ async def update_history_from_api(session):
         outcome = OUTCOME_MAP.get(outcome_raw)
         if not outcome:
             s = str(outcome_raw).lower()
-            if "player" in s: outcome = "🔵"
-            elif "banker" in s: outcome = "🔴"
-            elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
+            if "player" in s: outcome = "Player"
+            elif "banker" in s: outcome = "Banker"
+            elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "Tie"
 
         if outcome and state["last_round_id"] != round_id:
             state["last_round_id"] = round_id
             state["history"].append(outcome)
-            if player_dice is not None and banker_dice is not None:
-                state["player_score_last"] = player_dice
-                state["banker_score_last"] = banker_dice
+            analyzer.add_result(outcome)
             if len(state["history"]) > 200:
                 state["history"].pop(0)
             logger.info(f"Novo resultado → {outcome} | round {round_id}")
             state["signal_cooldown"] = False
     except Exception as e:
         await send_error_to_channel(f"Erro processando API: {str(e)}")
-
 
 def main_entry_text(color: str) -> str:
     cor_nome = "AZUL" if color == "🔵" else "VERMELHO"
@@ -449,13 +273,11 @@ def main_entry_text(color: str) -> str:
         f"🤑 <b>VAI ENTRAR DINHEIRO</b> 🤑"
     )
 
-
 def green_text() -> str:
     return (
         "🤡 <b>ENTROU DINHEIRO</b> 🤡\n"
         "🎲 <b>MAIS FOCO E MENOS GANÂNCIA</b> 🎲"
     )
-
 
 async def send_gale_warning(level: int):
     if level not in (1, 2):
@@ -465,11 +287,9 @@ async def send_gale_warning(level: int):
     if msg_id:
         state["martingale_message_ids"].append(msg_id)
 
-
 async def clear_gale_messages():
     await delete_messages(state["martingale_message_ids"])
     state["martingale_message_ids"] = []
-
 
 async def resolve_after_result():
     if not state.get("waiting_for_result", False) or not state.get("last_signal_color"):
@@ -491,8 +311,8 @@ async def resolve_after_result():
 
     placar_text = format_placar()
 
-    if last_outcome in ("🟡", target):
-        if last_outcome == "🟡":
+    if last_outcome in ("Tie", target):
+        if last_outcome == "Tie":
             state["total_empates"] += 1
             state["greens_seguidos"] = 0
         else:
@@ -545,7 +365,6 @@ async def resolve_after_result():
     reset_placar_if_needed()
     await refresh_analise_message()
 
-
 async def try_send_signal():
     if state["waiting_for_result"]:
         await delete_analise_message()
@@ -559,14 +378,22 @@ async def try_send_signal():
         await refresh_analise_message()
         return
 
-    padrao, cor = gerar_sinal_estrategia(state["history"])
+    pred, pattern = analyzer.predict()
 
-    if not cor:
+    if not pred:
         await refresh_analise_message()
         return
 
+    # Traduz para emoji do canal
+    if pred == "Player":
+        cor = "🔵"
+    elif pred == "Banker":
+        cor = "🔴"
+    else:
+        cor = "🟡"  # raro
+
     seq_str = "".join(state["history"][-8:])
-    if state["last_signal_pattern"] == padrao and state["last_signal_sequence"] == seq_str:
+    if state["last_signal_pattern"] == pattern and state["last_signal_sequence"] == seq_str:
         await refresh_analise_message()
         return
 
@@ -579,11 +406,10 @@ async def try_send_signal():
         state["waiting_for_result"] = True
         state["last_signal_color"] = cor
         state["martingale_count"] = 0
-        state["last_signal_pattern"] = padrao
+        state["last_signal_pattern"] = pattern
         state["last_signal_sequence"] = seq_str
         state["last_signal_round_id"] = state["last_round_id"]
-        logger.info(f"Sinal enviado: {cor} | Estratégia: {padrao}")
-
+        logger.info(f"Sinal enviado: {cor} | Estratégia: {pattern}")
 
 async def api_worker():
     async with aiohttp.ClientSession() as session:
@@ -597,7 +423,6 @@ async def api_worker():
                 await asyncio.sleep(10)
             await asyncio.sleep(API_POLL_INTERVAL)
 
-
 async def scheduler_worker():
     await asyncio.sleep(3)
     while True:
@@ -609,12 +434,10 @@ async def scheduler_worker():
             await send_error_to_channel(f"Erro no envio de sinais:\n<code>{str(e)}</code>")
         await asyncio.sleep(SIGNAL_CYCLE_INTERVAL)
 
-
 async def main():
     logger.info("🤖 Bot iniciado...")
-    await send_to_channel("🤖 Bot iniciado - usando estratégias avançadas...")
+    await send_to_channel("🤖 Bot iniciado - Estratégia Maioria Recente (melhor performance)")
     await asyncio.gather(api_worker(), scheduler_worker())
-
 
 if __name__ == "__main__":
     try:
