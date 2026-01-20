@@ -49,7 +49,7 @@ logger = logging.getLogger("BacBoBot")
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 state: Dict[str, Any] = {
-    "history": [],                          # agora guarda "Player", "Banker", "Tie"
+    "history": [],                          # "Player", "Banker", "Tie"
     "last_round_id": None,
     "waiting_for_result": False,
     "last_signal_color": None,
@@ -93,7 +93,6 @@ class BacBoAnalyzer:
         }
 
     def predict(self) -> Tuple[Optional[str], str]:
-        """Estratégia principal: Frequency (melhor performance) + fallbacks"""
         if len(self.history) < 8:
             return None, "Histórico insuficiente"
 
@@ -106,20 +105,17 @@ class BacBoAnalyzer:
         p_banker = stats["Banker"] / total
         p_tie    = stats["Tie"]    / total
 
-        # Frequency: aposta no mais frequente (com proteção contra Tie fraco)
         if p_player > p_banker and p_player > p_tie + 0.05:
             return "Player", "Maioria Recente"
         elif p_banker > p_player and p_banker > p_tie + 0.05:
             return "Banker", "Maioria Recente"
 
-        # Fallback 1: Alternância / repetição
         if len(self.history) >= 3:
             last3 = self.history[-3:]
             if last3[0] == last3[1] == last3[2] and last3[0] != "Tie":
                 opp = "Banker" if last3[0] == "Player" else "Player"
                 return opp, "Repetição 3x → Oposto"
 
-        # Fallback 2: Último vencedor não-tie
         for r in reversed(self.history):
             if r != "Tie":
                 return r, "Último Vencedor"
@@ -274,9 +270,12 @@ def main_entry_text(color: str) -> str:
     )
 
 def green_text() -> str:
+    streak = state["greens_seguidos"]
+    emoji_fire = "🔥" * min(streak, 5)  # até 5 fogos para não exagerar
     return (
-        "🤡 <b>ENTROU DINHEIRO</b> 🤡\n"
-        "🎲 <b>MAIS FOCO E MENOS GANÂNCIA</b> 🎲"
+        f"✅ <b>GREEN! +1</b> ✅\n"
+        f"Greens seguidos: <b>{streak}</b> {emoji_fire}\n"
+        f"🎲 <b>MAIS FOCO E MENOS GANÂNCIA</b> 🎲"
     )
 
 async def send_gale_warning(level: int):
@@ -319,8 +318,9 @@ async def resolve_after_result():
             state["greens_seguidos"] += 1
             state["total_greens"] += 1
 
-        await send_to_channel(green_text())
-        await send_to_channel(placar_text)
+            # Mensagem principal de green com streak
+            await send_to_channel(green_text())
+            await send_to_channel(placar_text)
 
         await clear_gale_messages()
 
@@ -384,13 +384,12 @@ async def try_send_signal():
         await refresh_analise_message()
         return
 
-    # Traduz para emoji do canal
     if pred == "Player":
         cor = "🔵"
     elif pred == "Banker":
         cor = "🔴"
     else:
-        cor = "🟡"  # raro
+        cor = "🟡"
 
     seq_str = "".join(state["history"][-8:])
     if state["last_signal_pattern"] == pattern and state["last_signal_sequence"] == seq_str:
@@ -436,7 +435,7 @@ async def scheduler_worker():
 
 async def main():
     logger.info("🤖 Bot iniciado...")
-    await send_to_channel("🤖 Bot iniciado - Estratégia Maioria Recente (melhor performance)")
+    await send_to_channel("🤖 Bot iniciado - Estratégia Maioria Recente + contador de greens seguidos")
     await asyncio.gather(api_worker(), scheduler_worker())
 
 if __name__ == "__main__":
