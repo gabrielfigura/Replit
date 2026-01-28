@@ -1,12 +1,14 @@
 import os
 import asyncio
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 import pytz
 from collections import Counter
 
 import aiohttp
+import numpy as np
+from scipy import stats
 from telegram import Bot
 from telegram.error import TelegramError
 from dotenv import load_dotenv
@@ -73,6 +75,14 @@ state: Dict[str, Any] = {
     "last_result_round_id": None,
     "player_score_last": None,
     "banker_score_last": None,
+    
+    # ──────────────── NOVO ────────────────
+    "market_regime": "NEUTRAL",
+    "volatility_index": 0.0,
+    "trend_strength": 0.0,
+    "adaptive_threshold": 0.62,
+    "pattern_success_rate": {},           # ex: "Rep 4x_🔵": 0.72
+    "last_signals": [],                   # lista de dicts para feedback adaptativo
 }
 
 async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
@@ -148,9 +158,15 @@ def format_placar() -> str:
     )
 
 def format_analise_text() -> str:
+    regime = state.get("market_regime", "—")
+    vol = state.get("volatility_index", 0) * 100
+    thresh = state.get("adaptive_threshold", 0.62) * 100
     return (
-        "🎲 <b>ANALISANDO...</b> 🎲\n\n"
-        "<i>Aguarde o próximo sinal</i>"
+        f"🎲 <b>ANALISANDO...</b> 🎲\n\n"
+        f"Regime: <b>{regime}</b>\n"
+        f"Volatilidade: <b>{vol:.0f}%</b>\n"
+        f"Limiar atual: <b>{thresh:.0f}%</b>\n\n"
+        "<i>Aguarde o próximo sinal de alta confiança</i>"
     )
 
 async def refresh_analise_message():
@@ -227,80 +243,187 @@ async def update_history_from_api(session):
 def oposto(cor: str) -> str:
     return "🔵" if cor == "🔴" else "🔴"
 
-def estrategia_repeticao(hist: List[str]):
-    if len(hist) >= 3 and hist[-1] == hist[-2] == hist[-3] and hist[-1] in ("🔵", "🔴"):
-        return ("Repetição 3x", hist[-1])
-    if len(hist) >= 2 and hist[-1] == hist[-2] and hist[-1] in ("🔵", "🔴"):
-        return ("Repetição 2x", hist[-1])
-    return None
+# ───────────────────────────────────────────────
+#     NOVA LÓGICA AVANÇADA DE SINAIS (2025)
+# ───────────────────────────────────────────────
 
-def estrategia_alternancia(hist: List[str]):
-    if len(hist) >= 4:
-        last4 = hist[-4:]
-        if all(x in ("🔵", "🔴") for x in last4) and last4[0] == last4[2] and last4[1] == last4[3] and last4[0] != last4[1]:
-            return ("Alternância ABAB", oposto(last4[-1]))
-    return None
+def limpar_history_para_analise(history: List[str]) -> List[str]:
+    return [x for x in history if x in ("🔵", "🔴")]
 
-def estrategia_seq_empate(hist: List[str]):
-    if len(hist) >= 2 and hist[-2] == "🟡" and hist[-1] in ("🔵", "🔴"):
-        return ("Sequência de Tie", hist[-1])
-    return None
+def calcular_volatilidade(history: List[str]) -> float:
+    if len(history) < 4:
+        return 0.0
+    clean = limpar_history_para_analise(history[-20:])
+    if len(clean) < 3:
+        return 0.0
+    changes = sum(1 for a, b in zip(clean, clean[1:]) if a != b)
+    return changes / (len(clean) - 1) if len(clean) > 1 else 0.0
 
-def estrategia_ultima(hist: List[str]):
-    if len(hist) >= 1 and hist[-1] in ("🔵", "🔴"):
-        return ("Última vencedora", hist[-1])
-    return None
+def ajustar_limiar_adaptativo(confianca_atual: float):
+    if not state["last_signals"]:
+        return
+    recentes = state["last_signals"][-10:]
+    if not recentes:
+        return
+    taxa_real = sum(1 for x in recentes if x["acertou"]) / len(recentes)
+    if taxa_real > 0.70 and state["adaptive_threshold"] > 0.58:
+        state["adaptive_threshold"] = max(0.58, state["adaptive_threshold"] - 0.012)
+    elif taxa_real < 0.48 and state["adaptive_threshold"] < 0.80:
+        state["adaptive_threshold"] += 0.015
+    state["adaptive_threshold"] = round(np.clip(state["adaptive_threshold"], 0.56, 0.84), 3)
 
-def estrategia_maj5(hist: List[str]):
-    window = [x for x in hist[-5:] if x in ("🔵", "🔴")]
-    if len(window) >= 3:
-        cnt = Counter(window)
-        most, _ = cnt.most_common(1)[0]
-        return ("Maioria 5", most)
-    return None
+def detectar_regime_mercado(history: List[str]) -> Dict[str, Any]:
+    clean = limpar_history_para_analise(history[-14:])
+    if len(clean) < 8:
+        return {"tipo": "NEUTRAL", "forca": 0.0}
+    cnt = Counter(clean)
+    total = cnt["🔵"] + cnt["🔴"]
+    if total == 0:
+        return {"tipo": "NEUTRAL", "forca": 0.0}
+    blue_ratio = cnt["🔵"] / total
+    red_ratio = cnt["🔴"] / total
+    max_ratio = max(blue_ratio, red_ratio)
+    if max_ratio > 0.72:
+        regime = "BULL" if blue_ratio > red_ratio else "BEAR"
+    elif max_ratio > 0.58:
+        regime = "TENDÊNCIA FRACA"
+    else:
+        regime = "NEUTRAL / CHOPPY"
+    forca = (max_ratio - 0.5) * 2
+    return {"tipo": regime, "forca": round(forca, 3)}
 
-def estrategia_paridade(player_score, banker_score):
-    if player_score is None or banker_score is None:
-        return None
+def analisar_tendencia_principal(history: List[str]) -> Dict[str, Any]:
+    clean = limpar_history_para_analise(history)
+    if len(clean) < 7:
+        return {"direcao": None, "forca": 0.0}
+    ratios = []
+    for w in [5, 8, 12, 16]:
+        if len(clean) >= w:
+            window = clean[-w:]
+            blue_r = window.count("🔵") / len(window)
+            ratios.append(blue_r)
+    if len(ratios) < 3:
+        return {"direcao": None, "forca": 0.0}
+    x = np.arange(len(ratios))
+    y = np.array(ratios)
     try:
-        ps = int(player_score)
-        bs = int(banker_score)
-        if ps % 2 == 1 and bs % 2 == 0:
-            return ("Paridade", "🔵")
-        if bs % 2 == 1 and ps % 2 == 0:
-            return ("Paridade", "🔴")
+        slope, _, r_value, _, _ = stats.linregress(x, y)
+        if abs(slope) < 0.008:
+            direcao = None
+        else:
+            direcao = "🔵" if slope > 0 else "🔴"
+        forca = abs(r_value) ** 1.4
+        forca = min(0.99, max(0.0, forca))
     except:
-        pass
-    return None
+        direcao, forca = None, 0.0
+    return {"direcao": direcao, "forca": round(forca, 3)}
 
-def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=None):
-    estrategias = [
-        estrategia_repeticao,
-        estrategia_alternancia,
-        estrategia_seq_empate,
-        estrategia_ultima,
-        estrategia_maj5,
-    ]
+def detectar_padroes_complexos(history: List[str]) -> List[Dict[str, Any]]:
+    padroes = []
+    n = len(history)
+    # Repetições
+    for length in [3,4,5,6]:
+        if n >= length and all(x == history[-1] for x in history[-length:]):
+            if history[-1] == "🟡": continue
+            padroes.append({
+                "tipo": f"Rep {length}x",
+                "cor": history[-1],
+                "conf": min(0.45 + length*0.09, 0.82),
+                "complexidade": length
+            })
+    # Alternância
+    if n >= 6:
+        last6 = history[-6:]
+        if all(x in ("🔵","🔴") for x in last6) and \
+           last6[0] == last6[2] == last6[4] and \
+           last6[1] == last6[3] == last6[5] and \
+           last6[0] != last6[1]:
+            prox = oposto(last6[-1])
+            padroes.append({
+                "tipo": "Alt ABABAB",
+                "cor": prox,
+                "conf": 0.68,
+                "complexidade": 3
+            })
+    # Pós-empate
+    if n >= 2 and history[-2] == "🟡" and history[-1] in ("🔵","🔴"):
+        key = f"pos-tie-{history[-1]}"
+        sucesso = state["pattern_success_rate"].get(key, 0.52)
+        padroes.append({
+            "tipo": "Pós-Tie",
+            "cor": history[-1],
+            "conf": 0.38 + sucesso*0.34,
+            "complexidade": 2
+        })
+    # Maioria forte
+    if n >= 10:
+        recent10 = limpar_history_para_analise(history[-10:])
+        if len(recent10) >= 7:
+            cnt = Counter(recent10)
+            most, qtd = cnt.most_common(1)[0]
+            ratio = qtd / len(recent10)
+            if ratio >= 0.70:
+                padroes.append({
+                    "tipo": "Maioria forte 10",
+                    "cor": most,
+                    "conf": 0.55 + (ratio-0.7)*1.2,
+                    "complexidade": 2
+                })
+    return padroes
 
-    seen = set()
-    for func in estrategias:
-        res = func(history)
-        if res and res[1] not in seen:
-            seen.add(res[1])
-            return res
+def gerar_sinal_avancado(history: List[str], player_score=None, banker_score=None) -> Tuple[Optional[str], Optional[str], float]:
+    if len(history) < 8:
+        return None, None, 0.0
 
-    res_par = estrategia_paridade(player_score, banker_score)
-    if res_par and res_par[1] not in seen:
-        return res_par
+    regime = detectar_regime_mercado(history)
+    state["market_regime"] = regime["tipo"]
+    
+    vol = calcular_volatilidade(history)
+    state["volatility_index"] = round(vol, 3)
+    
+    tendencia = analisar_tendencia_principal(history)
+    state["trend_strength"] = tendencia["forca"]
+    
+    padroes = detectar_padroes_complexos(history)
+    if not padroes:
+        return None, None, 0.0
+    
+    padroes_ordenados = sorted(
+        padroes,
+        key=lambda p: p["conf"] * (1 + p["complexidade"]*0.18),
+        reverse=True
+    )
+    
+    melhor = padroes_ordenados[0]
+    confianca = melhor["conf"]
+    
+    if regime["forca"] > 0.4:
+        if (regime["tipo"] == "BULL" and melhor["cor"] == "🔵") or \
+           (regime["tipo"] == "BEAR" and melhor["cor"] == "🔴"):
+            confianca *= 1.12
+        else:
+            confianca *= 0.88
+    
+    if vol > 0.75:
+        confianca *= 0.84
+    
+    confianca = min(0.92, max(0.40, confianca))
+    
+    ajustar_limiar_adaptativo(confianca)
+    
+    if confianca >= state["adaptive_threshold"]:
+        return melhor["tipo"], melhor["cor"], round(confianca, 3)
+    
+    return None, None, 0.0
 
-    return None, None
-
-def main_entry_text(color: str) -> str:
+def main_entry_text(color: str, estrategia: str, confianca: float) -> str:
     cor_nome = "AZUL" if color == "🔵" else "VERMELHO"
     emoji = color
+    conf_str = f" ({confianca:.1%})" if confianca > 0 else ""
     return (
         f"🎲 <b>CLEVER_M</b> 🎲\n"
-        f"🧠 APOSTA EM: <b>{emoji} {cor_nome}</b>\n"
+        f"🧠 APOSTA EM: <b>{emoji} {cor_nome}{conf_str}</b>\n"
+        f"📊 <i>{estrategia}</i>\n"
         f"🛡️ Proteja o TIE <b>🟡</b>\n"
         f"<b>FAZER ATÉ 2 GALE</b>\n"
         f"🤑 <b>VAI ENTRAR DINHEIRO</b> 🤑"
@@ -343,20 +466,28 @@ async def resolve_after_result():
     state["last_result_round_id"] = state["last_round_id"]
     target = state["last_signal_color"]
 
-    acertou = (last_outcome == target)
+    acertou_cor = (last_outcome == target)
     is_tie = (last_outcome == "🟡")
+    acertou = acertou_cor or is_tie
+
+    # Registrar para feedback adaptativo
+    state["last_signals"].append({"acertou": acertou, "cor": target})
+    if len(state["last_signals"]) > 40:
+        state["last_signals"].pop(0)
 
     if acertou:
-        # Acerto real (cor correta) → incrementa a categoria correspondente
         state["total_greens"] += 1
         state["greens_seguidos"] += 1
 
-        if state["martingale_count"] == 0:
-            state["greens_sem_gale"] += 1
-        elif state["martingale_count"] == 1:
-            state["greens_gale_1"] += 1
-        elif state["martingale_count"] == 2:
-            state["greens_gale_2"] += 1
+        if is_tie:
+            state["total_empates"] += 1
+        else:
+            if state["martingale_count"] == 0:
+                state["greens_sem_gale"] += 1
+            elif state["martingale_count"] == 1:
+                state["greens_gale_1"] += 1
+            elif state["martingale_count"] == 2:
+                state["greens_gale_2"] += 1
 
         await send_to_channel(green_text(state["greens_seguidos"]))
         await send_to_channel(format_placar())
@@ -378,33 +509,7 @@ async def resolve_after_result():
         })
         return
 
-    if is_tie:
-        # Empate → só aumenta empates e total greens (não entra nas categorias de gale/sem gale)
-        state["total_greens"] += 1
-        state["total_empates"] += 1
-        state["greens_seguidos"] += 1
-
-        await send_to_channel(green_text(state["greens_seguidos"]))
-        await send_to_channel(format_placar())
-
-        seq_text = f"ESTAMOS NUMA SEQUÊNCIA DE {state['greens_seguidos']} GANHOS SEGUIDOS 🔥"
-        await send_to_channel(seq_text)
-
-        await clear_gale_messages()
-
-        state.update({
-            "waiting_for_result": False,
-            "last_signal_color": None,
-            "martingale_count": 0,
-            "entrada_message_id": None,
-            "last_signal_pattern": None,
-            "last_signal_sequence": None,
-            "last_signal_round_id": None,
-            "signal_cooldown": True
-        })
-        return
-
-    # Perda real nessa tentativa
+    # Perda real
     state["martingale_count"] += 1
 
     if state["martingale_count"] == 1:
@@ -444,38 +549,39 @@ async def try_send_signal():
         await refresh_analise_message()
         return
 
-    if len(state["history"]) < 2:
+    if len(state["history"]) < 8:  # exigência mínima aumentada
         await refresh_analise_message()
         return
 
-    padrao, cor = gerar_sinal_estrategia(
+    estrategia, cor, confianca = gerar_sinal_avancado(
         state["history"],
         state.get("player_score_last"),
         state.get("banker_score_last")
     )
 
-    if not cor:
+    if not cor or confianca < state["adaptive_threshold"]:
         await refresh_analise_message()
         return
 
-    seq_str = "".join(state["history"][-6:])
-    if state["last_signal_pattern"] == padrao and state["last_signal_sequence"] == seq_str:
+    # Evitar repetir o mesmo sinal consecutivo
+    seq_str = "".join(state["history"][-8:])
+    if state["last_signal_pattern"] == estrategia and state["last_signal_sequence"] == seq_str:
         await refresh_analise_message()
         return
 
     await delete_analise_message()
     state["martingale_message_ids"] = []
 
-    msg_id = await send_to_channel(main_entry_text(cor))
+    msg_id = await send_to_channel(main_entry_text(cor, estrategia, confianca))
     if msg_id:
         state["entrada_message_id"] = msg_id
         state["waiting_for_result"] = True
         state["last_signal_color"] = cor
         state["martingale_count"] = 0
-        state["last_signal_pattern"] = padrao
+        state["last_signal_pattern"] = estrategia
         state["last_signal_sequence"] = seq_str
         state["last_signal_round_id"] = state["last_round_id"]
-        logger.info(f"Sinal enviado: {cor} | Estratégia: {padrao}")
+        logger.info(f"Sinal enviado: {cor} | {estrategia} | conf {confianca:.3f}")
 
 async def api_worker():
     async with aiohttp.ClientSession() as session:
@@ -502,7 +608,7 @@ async def scheduler_worker():
 
 async def main():
     logger.info("🤖 Bot iniciado...")
-    await send_to_channel("🤖 Bot iniciado - procurando sinais...")
+    await send_to_channel("🤖 Bot iniciado - procurando sinais avançados...")
     await asyncio.gather(api_worker(), scheduler_worker())
 
 if __name__ == "__main__":
