@@ -135,14 +135,14 @@ def format_placar() -> str:
     acert = calcular_acertividade()
     return (
         "🏆 <b>RESUMO</b> 🏆\n"
-        f"✅ Ganhos sem gale:    <b>{state['greens_sem_gale']}</b>\n"
-        f"🔄 Ganhos gale 1:       <b>{state['greens_gale_1']}</b>\n"
-        f"🔄 Ganhos gale 2:       <b>{state['greens_gale_2']}</b>\n"
-        f"🤝 Total empates:       <b>{state['total_empates']}</b>\n"
-        f"⛔ Losses reais:        <b>{state['total_losses']}</b>\n"
+        f"✅ Ganhos sem gale: <b>{state['greens_sem_gale']}</b>\n"
+        f"🔄 Ganhos gale 1: <b>{state['greens_gale_1']}</b>\n"
+        f"🔄 Ganhos gale 2: <b>{state['greens_gale_2']}</b>\n"
+        f"🤝 Total empates: <b>{state['total_empates']}</b>\n"
+        f"⛔ Losses reais: <b>{state['total_losses']}</b>\n"
         f"─────────────────────────────\n"
-        f"🎯 Total greens:        <b>{state['total_greens']}</b>\n"
-        f"🎯 Acertividade:        <b>{acert}</b>"
+        f"🎯 Total greens: <b>{state['total_greens']}</b>\n"
+        f"🎯 Acertividade: <b>{acert}</b>"
     )
 
 def format_analise_text() -> str:
@@ -194,16 +194,21 @@ async def update_history_from_api(session):
             pl = result.get("player") or result.get("playerDice") or {}
             bk = result.get("banker") or result.get("bankerDice") or {}
             for k in ("score", "sum", "total", "points"):
-                if k in pl: player_dice = pl[k]
-                if k in bk: banker_dice = bk[k]
+                if k in pl:
+                    player_dice = pl[k]
+                if k in bk:
+                    banker_dice = bk[k]
         if not round_id or not outcome_raw:
             return
         outcome = OUTCOME_MAP.get(outcome_raw)
         if not outcome:
             s = str(outcome_raw).lower()
-            if "player" in s: outcome = "🔵"
-            elif "banker" in s: outcome = "🔴"
-            elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
+            if "player" in s:
+                outcome = "🔵"
+            elif "banker" in s:
+                outcome = "🔴"
+            elif any(x in s for x in ["tie", "empate", "draw"]):
+                outcome = "🟡"
         if outcome and state["last_round_id"] != round_id:
             state["last_round_id"] = round_id
             state["history"].append(outcome)
@@ -217,39 +222,68 @@ async def update_history_from_api(session):
     except Exception as e:
         await send_error_to_channel(f"Erro processando API: {str(e)}")
 
+# =============================================================================
+# ESTRATÉGIAS
+# =============================================================================
+
 def oposto(cor: str) -> str:
     return "🔵" if cor == "🔴" else "🔴"
 
 def estrategia_repeticao(hist: List[str]):
-    if len(hist) >= 3 and hist[-1] == hist[-2] == hist[-3] and hist[-1] in ("🔵", "🔴"):
-        return ("Repetição 3x", hist[-1])
-    if len(hist) >= 2 and hist[-1] == hist[-2] and hist[-1] in ("🔵", "🔴"):
-        return ("Repetição 2x", hist[-1])
+    if len(hist) >= 5 and all(x == hist[-1] for x in hist[-5:]) and hist[-1] in ("🔵", "🔴"):
+        return ("Reversão 5x", oposto(hist[-1]))
+    if len(hist) >= 4 and all(x == hist[-1] for x in hist[-4:]) and hist[-1] in ("🔵", "🔴"):
+        return ("Reversão 4x", oposto(hist[-1]))
     return None
 
 def estrategia_alternancia(hist: List[str]):
+    if len(hist) >= 6:
+        last6 = hist[-6:]
+        if all(x in ("🔵", "🔴") for x in last6):
+            if (last6[0] == last6[2] == last6[4] and 
+                last6[1] == last6[3] == last6[5] and 
+                last6[0] != last6[1]):
+                return ("Alternância 6x", oposto(last6[-1]))
     if len(hist) >= 4:
         last4 = hist[-4:]
-        if all(x in ("🔵", "🔴") for x in last4) and last4[0] == last4[2] and last4[1] == last4[3] and last4[0] != last4[1]:
-            return ("Alternância ABAB", oposto(last4[-1]))
+        if all(x in ("🔵", "🔴") for x in last4):
+            if last4[0] == last4[2] and last4[1] == last4[3] and last4[0] != last4[1]:
+                return ("Alternância 4x", oposto(last4[-1]))
     return None
 
 def estrategia_seq_empate(hist: List[str]):
-    if len(hist) >= 2 and hist[-2] == "🟡" and hist[-1] in ("🔵", "🔴"):
-        return ("Sequência de Tie", hist[-1])
+    if len(hist) >= 3:
+        if hist[-1] == "🟡" and hist[-2] in ("🔵", "🔴"):
+            return ("Pós-Tie Continuação", hist[-2])
+        if hist[-2] == "🟡" and hist[-1] in ("🔵", "🔴") and hist[-3] in ("🔵", "🔴"):
+            if hist[-1] == hist[-3]:
+                return ("Confirmação Pós-Tie", hist[-1])
     return None
 
-def estrategia_ultima(hist: List[str]):
-    if len(hist) >= 1 and hist[-1] in ("🔵", "🔴"):
-        return ("Última vencedora", hist[-1])
-    return None
-
-def estrategia_maj5(hist: List[str]):
-    window = [x for x in hist[-5:] if x in ("🔵", "🔴")]
-    if len(window) >= 3:
+def estrategia_tendencia_forte(hist: List[str]):
+    window = [x for x in hist[-10:] if x in ("🔵", "🔴")]
+    if len(window) >= 7:
         cnt = Counter(window)
-        most, _ = cnt.most_common(1)[0]
-        return ("Maioria 5", most)
+        for cor, freq in cnt.most_common(1):
+            if freq >= 7:
+                return ("Tendência Forte", cor)
+    return None
+
+def estrategia_quebra_padrao(hist: List[str]):
+    if len(hist) >= 6:
+        for i in range(4, min(8, len(hist))):
+            seq = hist[-(i+1):-1]
+            if all(x == seq[0] for x in seq) and seq[0] in ("🔵", "🔴"):
+                if hist[-1] in ("🔵", "🔴") and hist[-1] != seq[0]:
+                    return ("Quebra de Sequência", hist[-1])
+    return None
+
+def estrategia_recuperacao(hist: List[str]):
+    if len(hist) >= 4:
+        last4 = [x for x in hist[-4:] if x in ("🔵", "🔴")]
+        if len(last4) >= 3:
+            if last4[-1] == last4[-2] and last4[-3] != last4[-1]:
+                return ("Recuperação", oposto(last4[-1]))
     return None
 
 def estrategia_paridade(player_score, banker_score):
@@ -258,49 +292,67 @@ def estrategia_paridade(player_score, banker_score):
     try:
         ps = int(player_score)
         bs = int(banker_score)
-        if ps % 2 == 1 and bs % 2 == 0:
-            return ("Paridade", "🔵")
-        if bs % 2 == 1 and ps % 2 == 0:
-            return ("Paridade", "🔴")
+        if (ps + bs) % 2 == 0:
+            if ps > bs:
+                return ("Paridade Favorável", "🔵")
+            elif bs > ps:
+                return ("Paridade Favorável", "🔴")
     except:
         pass
     return None
 
+# Adicione aqui as outras estratégias que desejar (fibonacci, momentum, gap, etc.)
+# Por enquanto deixei as principais para o código rodar bem
+
 def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=None):
-    estrategias = [
-        estrategia_repeticao,
-        estrategia_alternancia,
-        estrategia_seq_empate,
-        estrategia_ultima,
-        estrategia_maj5,
-    ]
-    seen = set()
-    for func in estrategias:
-        res = func(history)
-        if res and res[1] not in seen:
-            seen.add(res[1])
-            return res
+    if len(history) < 5:
+        return None, None
+    
+    tier1 = [estrategia_tendencia_forte, estrategia_quebra_padrao, estrategia_repeticao]          # peso 3
+    tier2 = [estrategia_alternancia, estrategia_recuperacao]                                     # peso 2
+    tier3 = [estrategia_seq_empate]                                                              # peso 1.5
+    tier4 = []  # pode adicionar mais aqui se quiser
+    
+    votos = {"🔵": 0.0, "🔴": 0.0}
+    melhor_estrategia = None
+    
+    for tier, peso in [(tier1, 3.0), (tier2, 2.0), (tier3, 1.5), (tier4, 1.0)]:
+        for func in tier:
+            res = func(history)
+            if res:
+                votos[res[1]] += peso
+                if melhor_estrategia is None:
+                    melhor_estrategia = res[0]
+    
     res_par = estrategia_paridade(player_score, banker_score)
-    if res_par and res_par[1] not in seen:
-        return res_par
+    if res_par:
+        votos[res_par[1]] += 0.5
+    
+    total = votos["🔵"] + votos["🔴"]
+    diff = abs(votos["🔵"] - votos["🔴"])
+    
+    if total >= 4.0 and diff >= 2.0:
+        cor = "🔵" if votos["🔵"] > votos["🔴"] else "🔴"
+        confianca = (diff / total) * 100 if total > 0 else 0
+        nome = f"{melhor_estrategia or 'Multi-estratégia'} ({confianca:.0f}%)"
+        return (nome, cor)
+    
     return None, None
 
 def main_entry_text(color: str) -> str:
-    cor_nome = "AZUL" if color == "🔵" else "VERMELHO"
     emoji = color
     return (
-        f"🎲 <b>CLEVER_M</b> 🎲\n"
-        f"🧠 APOSTA EM: <b>{emoji} {cor_nome}</b>\n"
-        f"🛡️ Proteja o TIE <b>🟡</b>\n"
-        f"<b>FAZER ATÉ 2 GALE</b>\n"
-        f"🤑 <b>VAI ENTRAR DINHEIRO</b> 🤑"
+        f"🎲 ENTRADA DO CLEVER 🎲\n"
+        f"APOSTA NA COR: {emoji}\n"
+        f"PROTEJA O TIE 🟡"
     )
 
-def green_text(greens: int) -> str:
+def green_text(player_sum: Optional[int], banker_sum: Optional[int]) -> str:
+    p = player_sum if player_sum is not None else "?"
+    b = banker_sum if banker_sum is not None else "?"
     return (
-        f"🤡 <b>ENTROU DINHEIRO</b> 🤡\n"
-        f"🎲 <b>MAIS FOCO E MENOS GANÂNCIA</b> 🎲\n"
-        f"🔥 <b>CLEVER É O LÍDER</b> 🔥"
+        f"💰 ENTROU DINHEIRO 💰\n"
+        f"🔵 = {p}  &  🔴 = {b}"
     )
 
 async def send_gale_warning(level: int):
@@ -325,11 +377,17 @@ async def resolve_after_result():
     last_outcome = state["history"][-1]
     if state["last_signal_round_id"] == state["last_round_id"]:
         return
+    
     state["last_result_round_id"] = state["last_round_id"]
+    
     target = state["last_signal_color"]
     acertou = (last_outcome == target)
     is_tie = (last_outcome == "🟡")
-    if acertou:
+    
+    player_last = state.get("player_score_last")
+    banker_last = state.get("banker_score_last")
+    
+    if acertou or is_tie:
         state["total_greens"] += 1
         state["greens_seguidos"] += 1
         if state["martingale_count"] == 0:
@@ -338,11 +396,15 @@ async def resolve_after_result():
             state["greens_gale_1"] += 1
         elif state["martingale_count"] == 2:
             state["greens_gale_2"] += 1
-        await send_to_channel(green_text(state["greens_seguidos"]))
+        
+        await send_to_channel(green_text(player_last, banker_last))
         await send_to_channel(format_placar())
-        seq_text = f"ESTAMOS NUMA SEQUÊNCIA DE {state['greens_seguidos']} GANHOS SEGUIDOS 🔥"
+        
+        seq_text = f"SEQUÊNCIA DE {state['greens_seguidos']} GREENS 🔥"
         await send_to_channel(seq_text)
+        
         await clear_gale_messages()
+        
         state.update({
             "waiting_for_result": False,
             "last_signal_color": None,
@@ -354,37 +416,20 @@ async def resolve_after_result():
             "signal_cooldown": True
         })
         return
-    if is_tie:
-        state["total_greens"] += 1
-        state["total_empates"] += 1
-        state["greens_seguidos"] += 1
-        await send_to_channel(green_text(state["greens_seguidos"]))
-        await send_to_channel(format_placar())
-        seq_text = f"ESTAMOS NUMA SEQUÊNCIA DE {state['greens_seguidos']} GANHOS SEGUIDOS 🔥"
-        await send_to_channel(seq_text)
-        await clear_gale_messages()
-        state.update({
-            "waiting_for_result": False,
-            "last_signal_color": None,
-            "martingale_count": 0,
-            "entrada_message_id": None,
-            "last_signal_pattern": None,
-            "last_signal_sequence": None,
-            "last_signal_round_id": None,
-            "signal_cooldown": True
-        })
-        return
+    
     state["martingale_count"] += 1
     if state["martingale_count"] == 1:
         await send_gale_warning(1)
     elif state["martingale_count"] == 2:
         await send_gale_warning(2)
+    
     if state["martingale_count"] >= 3:
         state["greens_seguidos"] = 0
         state["total_losses"] += 1
         await send_to_channel("🟥 <b>LOSS 🟥</b>")
         await send_to_channel(format_placar())
         await clear_gale_messages()
+        
         state.update({
             "waiting_for_result": False,
             "last_signal_color": None,
@@ -395,7 +440,8 @@ async def resolve_after_result():
             "last_signal_round_id": None,
             "signal_cooldown": True
         })
-    reset_placar_if_needed()
+        reset_placar_if_needed()
+    
     await refresh_analise_message()
 
 async def try_send_signal():
@@ -405,23 +451,28 @@ async def try_send_signal():
     if state["signal_cooldown"]:
         await refresh_analise_message()
         return
-    if len(state["history"]) < 2:
+    if len(state["history"]) < 5:  # aumentado para combinar com gerar_sinal
         await refresh_analise_message()
         return
+    
     padrao, cor = gerar_sinal_estrategia(
         state["history"],
         state.get("player_score_last"),
         state.get("banker_score_last")
     )
+    
     if not cor:
         await refresh_analise_message()
         return
-    seq_str = "".join(state["history"][-6:])
+    
+    seq_str = "".join(state["history"][-8:])
     if state["last_signal_pattern"] == padrao and state["last_signal_sequence"] == seq_str:
         await refresh_analise_message()
         return
+    
     await delete_analise_message()
     state["martingale_message_ids"] = []
+    
     msg_id = await send_to_channel(main_entry_text(cor))
     if msg_id:
         state["entrada_message_id"] = msg_id
@@ -442,7 +493,6 @@ async def api_worker():
             except Exception as e:
                 logger.exception("Erro no api_worker")
                 await send_error_to_channel(f"Erro grave no loop da API:\n<code>{str(e)}</code>")
-                await asyncio.sleep(10)
             await asyncio.sleep(API_POLL_INTERVAL)
 
 async def scheduler_worker():
