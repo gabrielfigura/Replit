@@ -163,13 +163,10 @@ def calcular_acertividade() -> str:
 def format_placar() -> str:
     return (
         "🏆 <b>RESUMO</b> 🏆\n"
-        f"✅ Sem gale: <b>{state['greens_sem_gale']}</b>\n"
-        f"🔄 Gale 1: <b>{state['greens_gale_1']}</b>\n"
-        f"🔄 Gale 2: <b>{state['greens_gale_2']}</b>\n"
-        f"🤝 Empates: <b>{state['total_empates']}</b>\n"
-        f"⛔ Losses: <b>{state['total_losses']}</b>\n"
+        
+        f"🎯 Greens: <b>{state['total_greens']}</b>  |  Acertividade: <b>{calcular_acertividade()}</b>\n"
         f"────────────────────\n"
-        f"🎯 Greens: <b>{state['total_greens']}</b>  |  Acertividade: <b>{calcular_acertividade()}</b>"
+        f"⛔ Losses: <b>{state['total_losses']}</b>\n"
     )
 
 def format_analise_text() -> str:
@@ -289,16 +286,15 @@ def detectar_melhor_sinal():
 
 def main_entry_text(padrao: str, cor: str) -> str:
     return (
-        f"🎲 <b>SINAL ASSERTIVO – {cor}</b> 🎲\n\n"
-        f"{cor}   ←   {padrao}\n\n"
-        f"Proteja o Tie 🟡 (se aplicável)\n"
-        f"<i>Estratégia baseada em padrões reais do casino</i>"
+        f"🎲 ENTRADA DO CLEVER 🎲\n"
+        f"APOSTA NA COR: {color}\n"
+        f"PROTEJA O TIE 🟡"
     )
 
 def green_text():
     p = state.get("player_score_last", "?")
     b = state.get("banker_score_last", "?")
-    return f"💰 GREEN 💰\n🔵 {p}  •  🔴 {b}"
+    return f"💰 ENTROU DINHEIRO 💰\n🔵 {p}  •  🔴 {b}"
 
 async def send_gale_warning(level: int):
     if level not in (1,2): return
