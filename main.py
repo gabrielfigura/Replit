@@ -15,7 +15,6 @@ load_dotenv()
 # ───────────────────────────────────────────────
 # CONFIGURAÇÕES
 # ───────────────────────────────────────────────
-
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7345209825:AAE54I0tSUEdomWNOVkdTOFDnvY7jKBC4o0")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "-1003683356410")
 API_URL = "https://api-cs.casino.org/svc-evolution-game-events/api/bacbo/latest"
@@ -33,10 +32,9 @@ OUTCOME_MAP = {
     "🔵": "🔵", "🔴": "🔴", "🟡": "🟡",
 }
 
-API_POLL_INTERVAL      = 3
-SIGNAL_CYCLE_INTERVAL  = 6
+API_POLL_INTERVAL       = 3
+SIGNAL_CYCLE_INTERVAL   = 6
 ANALISE_REFRESH_INTERVAL = 15
-MIN_SCORE_TO_SIGNAL = 15.0   # Aumentado para reduzir repetição excessiva
 COOLDOWN_AFTER_SIGNAL_SECONDS = 20
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)-5s | %(message)s')
@@ -71,9 +69,28 @@ state: Dict[str, Any] = {
 }
 
 # ───────────────────────────────────────────────
+# PADRÕES EXATOS – SÓ ENVIA SINAL SE BATER UM DELES
+# ───────────────────────────────────────────────
+EXACT_PATTERNS = [
+    {"id": 390, "sequencia": ["🔴", "🟡", "🔵", "🔴", "🔵", "🔴", "🔴", "🔵", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 39,  "sequencia": ["🔵", "🟡", "🔴", "🔵", "🔴", "🔵", "🔵", "🔴", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 37,  "sequencia": ["🔴", "🟡", "🔵", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔵"},
+    {"id": 69,  "sequencia": ["🔵", "🟡", "🔴", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 79,  "sequencia": ["🔵", "🔵", "🟡", "🔴", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 19,  "sequencia": ["🔴", "🔴", "🟡", "🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 22,  "sequencia": ["🔵", "🔴", "🔴", "🔴", "🔵", "🔴", "🔴", "🔴", "🔴", "🔴", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 43,  "sequencia": ["🔴", "🔵", "🔵", "🔵", "🔴", "🔵", "🔵", "🔵", "🔵", "🔵", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 47,  "sequencia": ["🔴", "🟡", "🔴", "🔴", "🔴", "🔴", "🔵", "🔴", "🔴", "🔴", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 66,  "sequencia": ["🔵", "🟡", "🔵", "🔵", "🔵", "🔵", "🔴", "🔵", "🔵", "🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 68,  "sequencia": ["🔵", "🟡", "🔵", "🔵", "🔵", "🔵", "🔴", "🔵", "🔵", "🔵", "🔵", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔵"},
+    {"id": 12,  "sequencia": ["🔴", "🟡", "🔴", "🔴", "🔴", "🔴", "🔵", "🔴", "🔴", "🔴", "🔴", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 78,  "sequencia": ["🔵", "🟡", "🔴", "🔵", "🔵", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 60,  "sequencia": ["🔴", "🟡", "🔵", "🔴", "🔴", "🔴", "🔵"], "sinal": "🔴"},
+]
+
+# ───────────────────────────────────────────────
 # FUNÇÕES AUXILIARES
 # ───────────────────────────────────────────────
-
 def count_last_consecutive(hist: List[str], cor: str) -> int:
     count = 0
     for i in range(len(hist)-1, -1, -1):
@@ -83,14 +100,9 @@ def count_last_consecutive(hist: List[str], cor: str) -> int:
             break
     return count
 
-def count_without_tie(hist: List[str]) -> int:
-    count = 0
-    for i in range(len(hist)-1, -1, -1):
-        if hist[i] != "🟡":
-            count += 1
-        else:
-            break
-    return count
+def get_history_without_ties() -> list:
+    """Retorna histórico removendo todos os empates 🟡"""
+    return [x for x in state["history"] if x != "🟡"]
 
 def is_new_round():
     return state["last_round_id"] != state["last_processed_round_id"]
@@ -122,35 +134,11 @@ def format_placar() -> str:
     )
 
 def format_analise_text() -> str:
-    return "🎲 <b>ANALISANDO PADRÕES ASSERTIVOS...</b> 🎲\n\n<i>Aguarde sinal baseado em estratégias reais</i>"
-
-# ───────────────────────────────────────────────
-# PADRÕES – BALANCEADOS (menos viés para Banker)
-# ───────────────────────────────────────────────
-
-PATTERNS = [
-    (1,  "Triplo Jogador → Banker", lambda h,ps,bs: count_last_consecutive(h,"🔵") >= 3, "🔴", 7.9),
-    (2,  "Intercalado PB PB → Banker", lambda h,ps,bs: len(h)>=4 and h[-4:] == ["🔵","🔴","🔵","🔴"], "🔴", 7.6),
-    (4,  "Recuperação Empate → Anterior", lambda h,ps,bs: len(h)>=2 and h[-1]=="🟡" and h[-2] in ["🔵","🔴"], lambda h,ps,bs: h[-2], 7.8),
-    (6,  "Padrão 2-2 PPBB → Banker", lambda h,ps,bs: len(h)>=4 and h[-4:] == ["🔵","🔵","🔴","🔴"], "🔴", 7.8),
-    (11, "Padrão 3-1-3 PPP B PPP → Banker", lambda h,ps,bs: len(h)>=7 and h[-7:-4]==["🔵"]*3 and h[-4]=="🔴" and h[-3:]==["🔵"]*3, "🔴", 8.2),
-    (13, "Onda Alternada PBx3 → Player", lambda h,ps,bs: len(h)>=6 and h[-6:]==["🔵","🔴"]*3, "🔵", 8.7),
-    (16, "Quebra Coluna Px4 → Banker", lambda h,ps,bs: count_last_consecutive(h,"🔵") >= 4, "🔴", 7.9),
-    (23, "Salto Tigre P B P → Player", lambda h,ps,bs: len(h)>=3 and h[-3:]==["🔵","🔴","🔵"], "🔵", 8.5),
-    (24, "Muralha Banker Bx5 → Player", lambda h,ps,bs: count_last_consecutive(h,"🔴") >= 5, "🔵", 8.8),
-    (27, "Ziguezague Curto P B P B → Player", lambda h,ps,bs: len(h)>=4 and h[-4:]==["🔵","🔴","🔵","🔴"], "🔵", 8.4),
-    (37, "Bloco 4 PPPP → Banker", lambda h,ps,bs: count_last_consecutive(h,"🔵") >= 4, "🔴", 7.7),
-    (100,"Banker Streak BB → Banker", lambda h,ps,bs: len(h)>=2 and h[-2:]==["🔴","🔴"], "🔴", 7.5),
-    (101,"Player Streak PP → Banker", lambda h,ps,bs: len(h)>=2 and h[-2:]==["🔵","🔵"], "🔴", 7.9),
-    (104,"Diferença 6+ → Reversão", lambda h,ps,bs: abs((ps or 0) - (bs or 0)) >=6, lambda h,ps,bs: "🔴" if (ps or 0) > (bs or 0) else "🔵", 8.1),
-    (109,"Tendência Forte Banker >70% last10", lambda h,ps,bs: len(h)>=10 and Counter(h[-10:])["🔴"]/10 >=0.7, "🔴", 8.0),
-    # Adicione mais se quiser – mantenha pontos entre 7.0–9.0
-]
+    return "🎲 <b>ANALISANDO PADRÕES EXATOS...</b> 🎲\n\n<i>Aguardando match com um dos padrões cadastrados</i>"
 
 # ───────────────────────────────────────────────
 # FUNÇÕES TELEGRAM
 # ───────────────────────────────────────────────
-
 async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
     try:
         msg = await bot.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=text, parse_mode=parse_mode, disable_web_page_preview=True)
@@ -186,7 +174,6 @@ async def refresh_analise_message():
 # ───────────────────────────────────────────────
 # API + HISTÓRICO
 # ───────────────────────────────────────────────
-
 async def fetch_api(session):
     try:
         async with session.get(API_URL, headers=HEADERS, timeout=12) as r:
@@ -199,25 +186,21 @@ async def update_history_from_api(session):
     reset_placar_if_needed()
     data = await fetch_api(session)
     if not data: return
-
     try:
         if "data" in data: data = data["data"]
         rid = data.get("id")
         outcome_raw = (data.get("result") or {}).get("outcome")
         if not rid or not outcome_raw: return
-
         outcome = OUTCOME_MAP.get(outcome_raw)
         if not outcome:
             s = str(outcome_raw).lower()
             if "player" in s: outcome = "🔵"
             elif "banker" in s: outcome = "🔴"
             elif any(x in s for x in ["tie","empate","draw"]): outcome = "🟡"
-
         if outcome and state["last_round_id"] != rid:
             state["last_round_id"] = rid
             state["history"].append(outcome)
             if len(state["history"]) > 300: state["history"].pop(0)
-
             result = data.get("result", {})
             ps = bs = None
             for side in ["player", "playerDice"]:
@@ -228,116 +211,71 @@ async def update_history_from_api(session):
                 d = result.get(side, {})
                 for k in ("score","sum","total","points"):
                     if k in d: bs = d[k]; break
-
             if ps is not None and bs is not None:
                 state["player_score_last"] = ps
                 state["banker_score_last"] = bs
                 state["history_sums"].append((ps, bs))
                 if len(state["history_sums"]) > 100: state["history_sums"].pop(0)
-
             logger.info(f"Resultado: {outcome} | round {rid} | P:{ps} B:{bs}")
-
             if outcome == "🟡" and not state["waiting_for_result"]:
                 state["total_empates"] += 1
-
     except Exception as e:
         logger.exception("Erro parse API")
 
 # ───────────────────────────────────────────────
-# DETECÇÃO DE SINAL – COM TIE-BREAKER
+# DETECÇÃO DE SINAL – APENAS PADRÕES EXATOS
 # ───────────────────────────────────────────────
+def detectar_sinal_exato():
+    h_clean = get_history_without_ties()
+    if len(h_clean) < 6:
+        return None, None
 
-def detectar_melhor_sinal():
-    h = state["history"]
-    if len(h) < 4: return None, None, None
+    for padrao in EXACT_PATTERNS:
+        seq = padrao["sequencia"]
+        sinal = padrao["sinal"]
+        tam = len(seq)
 
-    votos = {"🔵": 0.0, "🔴": 0.0, "🟡": 0.0}
-    ativados = []
+        if len(h_clean) >= tam:
+            ultimos = h_clean[-tam:]
+            if ultimos == seq:
+                desc = f"Padrão #{padrao['id']}  ({tam} jogadas sem empate)"
+                return desc, sinal
 
-    ps = state.get("player_score_last")
-    bs = state.get("banker_score_last")
-
-    for _, nome, cond, alvo, pts in PATTERNS:
-        try:
-            res = cond(h, ps, bs)
-            if res is True:
-                cor = alvo
-            elif callable(alvo):
-                cor = alvo(h, ps, bs)
-                if cor not in ("🔵","🔴","🟡"): continue
-            else:
-                continue
-
-            votos[cor] += pts
-            ativados.append(f"{nome} ({pts:.1f})")
-        except:
-            pass
-
-    total = sum(votos.values())
-    if total < MIN_SCORE_TO_SIGNAL: return None, None, None
-
-    cor = max(votos, key=votos.get)
-    confianca = votos[cor] / total * 100 if total > 0 else 0
-
-    # Tie-breaker: se diferença pequena, tenta alternar em relação ao último sinal
-    if len(votos) >= 2:
-        sorted_votos = sorted(votos.items(), key=lambda x: x[1], reverse=True)
-        if sorted_votos[0][1] - sorted_votos[1][1] < 1.8:  # margem pequena
-            ultima_cor = state.get("last_signal_color")
-            if ultima_cor == "🔴" and votos.get("🔵", 0) > 0:
-                cor = "🔵"
-            elif ultima_cor == "🔵" and votos.get("🔴", 0) > 0:
-                cor = "🔴"
-
-    desc = " + ".join(ativados[:3])
-    if len(ativados) > 3: desc += f" +{len(ativados)-3}"
-
-    return f"{desc} ({confianca:.0f}%)", cor, total
+    return None, None
 
 # ───────────────────────────────────────────────
 # PROCESSAMENTO DE RESULTADO
 # ───────────────────────────────────────────────
-
 async def process_round_result():
     if not state["waiting_for_result"] or not state["last_signal_color"]:
         return
-
     ultimo = state["history"][-1]
     alvo   = state["last_signal_color"]
-
     if ultimo == alvo or ultimo == "🟡":
         state["total_greens"] += 1
         state["greens_seguidos"] += 1
-
         if state["martingale_count"] == 0:
             state["greens_sem_gale"] += 1
         elif state["martingale_count"] == 1:
             state["greens_gale_1"] += 1
         elif state["martingale_count"] == 2:
             state["greens_gale_2"] += 1
-
         extra = " (empate)" if ultimo == "🟡" else ""
         tipo_entrada = "Entrada principal" if state["martingale_count"] == 0 else f"Gale {state['martingale_count']}"
-
         await send_to_channel(
             f"✅ <b>GREEN</b> ✅\n"
             f"{tipo_entrada}{extra}\n"
         )
-
         p = state.get("player_score_last", "?")
         b = state.get("banker_score_last", "?")
         resultado_texto = f"💰 {alvo} | {p} • {b}"
         if ultimo == "🟡":
             resultado_texto += "  🟡 EMPATE (GREEN)"
         await send_to_channel(resultado_texto)
-
         await send_to_channel(format_placar())
-
         if state["greens_seguidos"] >= 3:
             await send_to_channel(f"🔥 {state['greens_seguidos']} greens seguidos! 🔥")
-
         await clear_gale_messages()
-
         state.update({
             "waiting_for_result": False,
             "last_signal_color": None,
@@ -350,12 +288,10 @@ async def process_round_result():
         return
 
     state["martingale_count"] += 1
-
     if state["martingale_count"] == 1:
         mid = await send_to_channel("🔴 <b>GALE 1</b> – mesma cor!")
         if mid: state["gale_message_ids"].append(mid)
         return
-
     if state["martingale_count"] == 2:
         mid = await send_to_channel("🔴 <b>GALE 2</b> – última tentativa!")
         if mid: state["gale_message_ids"].append(mid)
@@ -363,11 +299,9 @@ async def process_round_result():
 
     state["greens_seguidos"] = 0
     state["total_losses"] += 1
-
     await send_to_channel("🟥 <b>LOSS</b> – gale 2 não entrou")
     await send_to_channel(format_placar())
     await clear_gale_messages()
-
     state.update({
         "waiting_for_result": False,
         "last_signal_color": None,
@@ -381,7 +315,6 @@ async def process_round_result():
 # ───────────────────────────────────────────────
 # ENVIO DE NOVO SINAL
 # ───────────────────────────────────────────────
-
 async def try_send_new_signal():
     if state["waiting_for_result"]:
         return
@@ -390,7 +323,7 @@ async def try_send_new_signal():
     if state["signal_cooldown"] and now < state["signal_cooldown_end"]:
         return
 
-    padrao, cor, score = detectar_melhor_sinal()
+    padrao, cor = detectar_sinal_exato()
     if not cor:
         return
 
@@ -401,15 +334,15 @@ async def try_send_new_signal():
     await clear_gale_messages()
 
     text = (
-        f"🎯 <b>SINAL CLEVER</b> 🎯\n"
+        f"🎯 <b>SINAL DETECTADO</b> 🎯\n"
         f"→ APOSTE: <b>{cor}</b>\n"
         f"Proteja o 🟡\n"
         f"<i>{padrao}</i>"
     )
-    msg_id = await send_to_channel(text)
 
+    msg_id = await send_to_channel(text)
     if msg_id:
-        state["last_signal_color"] = cor   # guarda para tie-breaker futuro
+        state["last_signal_color"] = cor
         state.update({
             "entrada_message_id": msg_id,
             "waiting_for_result": True,
@@ -423,7 +356,6 @@ async def try_send_new_signal():
 # ───────────────────────────────────────────────
 # WORKERS
 # ───────────────────────────────────────────────
-
 async def api_worker():
     async with aiohttp.ClientSession() as session:
         while True:
@@ -441,8 +373,8 @@ async def scheduler_worker():
         await asyncio.sleep(SIGNAL_CYCLE_INTERVAL)
 
 async def main():
-    logger.info("Bot iniciado – versão balanceada")
-    await send_to_channel("🤖 Bot atualizado – sinais mais variados (balanceamento + tie-breaker)")
+    logger.info("Bot iniciado – versão padrões exatos")
+    await send_to_channel("🤖 Bot atualizado – apenas sinais em padrões exatos cadastrados")
     await asyncio.gather(api_worker(), scheduler_worker())
 
 if __name__ == "__main__":
