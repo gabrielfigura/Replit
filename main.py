@@ -1,13 +1,16 @@
-from __future__ import annotations
+import os
 import asyncio
 import logging
-import time
-import math
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+import pytz
 from collections import Counter
-
 import aiohttp
 from telegram import Bot
+from telegram.error import TelegramError
+from dotenv import load_dotenv
 
+load_dotenv()
 
 # ============================================================
 # CONFIGURAÇÃO
