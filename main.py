@@ -6,6 +6,8 @@ from collections import Counter
 
 import aiohttp
 from telegram import Bot
+from __future__ import annotations
+
 
 # ============================================================
 # CONFIGURAÇÃO
