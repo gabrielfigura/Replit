@@ -13,8 +13,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configurações
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7525707247:AAHLVwSdes_UlaVQ5TUo72q-4mMZXE8_lfE")
-TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "-1003564529662")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8163319902:AAHE9LZ984JCIc-Lezl4WXR2FsGHPEFTxRQ")
+TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "-1003882537733")
 
 API_URL = "https://api.signals-house.com/validate/results?tableId=2&lastResult=13343863"
 
@@ -40,7 +40,7 @@ OUTCOME_MAP = {
 API_POLL_INTERVAL = 4.2
 SIGNAL_COOLDOWN_DURATION = 9
 
-GREEN_STICKER_ID = "CAACAgQAAxkBAAMCaanfUxV0k3upwRhvlpq9XyODGX4AAvAbAAL92lFROjONnjCocw86BA"
+GREEN_MESSAGE_START = "✅GREEN✅\n🔵="
 
 logging.basicConfig(
     level=logging.INFO,
@@ -76,6 +76,7 @@ state: Dict[str, Any] = {
     "player_score_last": None,
     "banker_score_last": None,
     "new_result_added": False,
+    "last_green_message_id": None,       # para evitar contar o mesmo green várias vezes
 }
 
 async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
@@ -89,17 +90,6 @@ async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
         return msg.message_id
     except Exception as e:
         logger.error(f"Erro ao enviar texto: {e}")
-        return None
-
-async def send_sticker_to_channel(sticker_id: str) -> Optional[int]:
-    try:
-        msg = await bot.send_sticker(
-            chat_id=TELEGRAM_CHANNEL_ID,
-            sticker=sticker_id
-        )
-        return msg.message_id
-    except Exception as e:
-        logger.error(f"Erro ao enviar sticker: {e}")
         return None
 
 async def send_error_to_channel(error_msg: str):
@@ -121,8 +111,6 @@ def should_reset_placar() -> bool:
     if state["last_reset_date"] != now.date():
         state["last_reset_date"] = now.date()
         return True
-    if state["total_losses"] >= 10:
-        return True
     return False
 
 def reset_placar_if_needed():
@@ -130,21 +118,20 @@ def reset_placar_if_needed():
         for k in ["total_greens", "greens_sem_gale", "greens_gale_1", "greens_gale_2",
                   "total_empates", "total_losses", "greens_seguidos"]:
             state[k] = 0
-        logger.info("Placar resetado")
+        logger.info("Placar resetado (novo dia)")
 
 def calcular_acertividade() -> str:
     total = state["total_greens"] + state["total_losses"]
-    return "—" if total == 0 else f"{(state['total_greens'] / total * 100):.1f}%"
+    if total == 0:
+        return "—"
+    return f"{(state['total_greens'] / total * 100):.2f}%"
 
 def format_placar() -> str:
     acert = calcular_acertividade()
     return (
-        "🏆 <b>RESUMO</b> 🏆\n"
-        f"✅ Sem gale: <b>{state['greens_sem_gale']}</b>\n"
-        f"🔄 Gale 1: <b>{state['greens_gale_1']}</b>\n"
-        f"🔄 Gale 2: <b>{state['greens_gale_2']}</b>\n"
-        f"⛔ Losses: <b>{state['total_losses']}</b>\n"
-        f"🎯 Greens: <b>{state['total_greens']}</b>  |  {acert}"
+        f"📊 Placar atual 🟢 {state['total_greens']} 🔴 {state['total_losses']}\n"
+        f"✅ Assertividade {acert}\n"
+        f"🏆 {state['greens_seguidos']} Greens seguidos"
     )
 
 def format_analise_text() -> str:
@@ -177,85 +164,37 @@ async def update_history_from_api(session):
         return
 
     try:
-        # A API signals-house retorna {"data": [...], "hasMore": ..., "count": ...}
         items = data.get("data", [])
-        if isinstance(items, list) and len(items) > 0:
-            latest = items[0]  # primeiro item = mais recente
-            round_id = latest.get("id")
-            if not round_id:
-                return
+        if not isinstance(items, list) or len(items) == 0:
+            return
 
-            outcome_raw = latest.get("result")  # "Player", "Banker", "Tie"
-            if not outcome_raw:
-                return
+        latest = items[0]
+        round_id = latest.get("id")
+        if not round_id or state["last_round_id"] == round_id:
+            return
 
-            score = latest.get("score")
+        outcome_raw = latest.get("result")
+        outcome = OUTCOME_MAP.get(outcome_raw)
+        if not outcome:
+            s = str(outcome_raw or "").lower()
+            if "player" in s: outcome = "🔵"
+            elif "banker" in s: outcome = "🔴"
+            elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
 
-            outcome = OUTCOME_MAP.get(outcome_raw)
-            if not outcome:
-                s = str(outcome_raw or "").lower()
-                if "player" in s: outcome = "🔵"
-                elif "banker" in s: outcome = "🔴"
-                elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
-
-            if outcome and state["last_round_id"] != round_id:
-                state["last_round_id"] = round_id
-                state["history"].append(outcome)
-                # Esta API não separa player_score/banker_score, apenas score total
-                state["player_score_last"] = None
-                state["banker_score_last"] = None
-                if len(state["history"]) > 200:
-                    state["history"].pop(0)
-                logger.info(f"Resultado novo: {outcome} (round {round_id}, score={score})")
-                state["new_result_added"] = True
-                state["signal_cooldown_until"] = datetime.now().timestamp() + 1.5
-
-        elif isinstance(items, dict):
-            # Fallback: caso a API mude e retorne objeto direto
-            round_id = items.get("id")
-            if not round_id:
-                return
-
-            outcome_raw = (items.get("result") or {}).get("outcome") if isinstance(items.get("result"), dict) else items.get("result")
-            if not outcome_raw:
-                return
-
-            player_dice = banker_dice = None
-            if isinstance(items.get("result"), dict):
-                result = items.get("result") or {}
-                pl = result.get("player") or result.get("playerDice") or {}
-                bk = result.get("banker") or result.get("bankerDice") or {}
-                for k in ("score", "sum", "total", "points"):
-                    if k in pl: player_dice = pl[k]
-                    if k in bk: banker_dice = bk[k]
-
-            outcome = OUTCOME_MAP.get(outcome_raw)
-            if not outcome:
-                s = str(outcome_raw or "").lower()
-                if "player" in s: outcome = "🔵"
-                elif "banker" in s: outcome = "🔴"
-                elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
-
-            if outcome and state["last_round_id"] != round_id:
-                state["last_round_id"] = round_id
-                state["history"].append(outcome)
-                if player_dice is not None and banker_dice is not None:
-                    state["player_score_last"] = player_dice
-                    state["banker_score_last"] = banker_dice
-                else:
-                    state["player_score_last"] = None
-                    state["banker_score_last"] = None
-                if len(state["history"]) > 200:
-                    state["history"].pop(0)
-                logger.info(f"Resultado novo: {outcome} (round {round_id})")
-                state["new_result_added"] = True
-                state["signal_cooldown_until"] = datetime.now().timestamp() + 1.5
+        if outcome:
+            state["last_round_id"] = round_id
+            state["history"].append(outcome)
+            if len(state["history"]) > 200:
+                state["history"].pop(0)
+            logger.info(f"Resultado novo: {outcome} (round {round_id})")
+            state["new_result_added"] = True
+            state["signal_cooldown_until"] = datetime.now().timestamp() + 1.5
 
     except Exception as e:
         logger.debug(f"Erro processando API: {e}")
 
 # ────────────────────────────────────────
-#  ESTRATÉGIAS
+#  ESTRATÉGIAS (mantidas iguais)
 # ────────────────────────────────────────
 
 def oposto(cor: str) -> str:
@@ -342,7 +281,7 @@ def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=N
 
 def main_entry_text(color: str) -> str:
     return (
-        f"🎲 ENTRADA DO CLEVER 🎲\n"
+        f"🎲 ENTRADA CONFIRMADA 🎲\n"
         f"APOSTA NA COR: {color}\n"
         f"PROTEJA O TIE 🟡"
     )
@@ -359,15 +298,54 @@ async def clear_gale_messages():
     await delete_messages(state["martingale_message_ids"])
     state["martingale_message_ids"] = []
 
+async def process_green_detected():
+    # Green detectado → conta acerto
+    state["total_greens"] += 1
+    state["greens_seguidos"] += 1
+
+    if state["martingale_count"] == 0:
+        state["greens_sem_gale"] += 1
+    elif state["martingale_count"] == 1:
+        state["greens_gale_1"] += 1
+    elif state["martingale_count"] == 2:
+        state["greens_gale_2"] += 1
+
+    # Envia placar + sequência juntos
+    await send_to_channel(format_placar())
+
+    await clear_gale_messages()
+
+    # Reseta estado do sinal
+    state.update({
+        "waiting_for_result": False,
+        "last_signal_color": None,
+        "martingale_count": 0,
+        "entrada_message_id": None,
+        "last_signal_pattern": None,
+        "last_signal_sequence": None,
+        "last_signal_round_id": None,
+        "signal_cooldown_until": datetime.now().timestamp() + SIGNAL_COOLDOWN_DURATION
+    })
+
 async def resolve_after_result():
-    if not state.get("waiting_for_result") or not state.get("last_signal_color"):
+    if not state.get("waiting_for_result"):
         return
-    if state["last_result_round_id"] == state["last_round_id"]:
-        return
+
+    # Aqui verificamos se houve green (mensagem específica)
+    # Como não temos polling de mensagens do canal neste código,
+    # a detecção real do texto "✅GREEN✅" precisaria vir de fora
+    # (outro bot, webhook, etc.). Por enquanto, assumimos que quando
+    # o resultado chega e era esperado acerto → tratamos como green.
+
+    # Se você tem outro bot enviando essa mensagem, considere:
+    #   - usar updates do Telegram (polling ou webhook) para detectar mensagens
+    #   - ou passar a mensagem via outra forma
+
+    # Lógica atual mantida como fallback: green = acerto ou tie
     if not state["history"]:
         return
 
-    if state["last_signal_round_id"] >= state["last_round_id"]:
+    if state["last_result_round_id"] == state["last_round_id"]:
         return
 
     last_outcome = state["history"][-1]
@@ -378,30 +356,12 @@ async def resolve_after_result():
     is_tie = last_outcome == "🟡"
 
     if acertou or is_tie:
-        state["total_greens"] += 1
-        state["greens_seguidos"] += 1
-        if state["martingale_count"] == 0: state["greens_sem_gale"] += 1
-        elif state["martingale_count"] == 1: state["greens_gale_1"] += 1
-        elif state["martingale_count"] == 2: state["greens_gale_2"] += 1
-
-        await send_sticker_to_channel(GREEN_STICKER_ID)
-        await send_to_channel(format_placar())
-        await send_to_channel(f"SEQUÊNCIA: {state['greens_seguidos']} greens 🔥")
-        await clear_gale_messages()
-
-        state.update({
-            "waiting_for_result": False,
-            "last_signal_color": None,
-            "martingale_count": 0,
-            "entrada_message_id": None,
-            "last_signal_pattern": None,
-            "last_signal_sequence": None,
-            "last_signal_round_id": None,
-            "signal_cooldown_until": datetime.now().timestamp() + SIGNAL_COOLDOWN_DURATION
-        })
+        await process_green_detected()
         return
 
+    # Loss / Gale
     state["martingale_count"] += 1
+
     if state["martingale_count"] == 1:
         await send_gale_warning(1)
     elif state["martingale_count"] == 2:
@@ -424,7 +384,6 @@ async def resolve_after_result():
             "last_signal_round_id": None,
             "signal_cooldown_until": datetime.now().timestamp() + SIGNAL_COOLDOWN_DURATION
         })
-        reset_placar_if_needed()
 
     await refresh_analise_message()
 
@@ -486,7 +445,7 @@ async def api_worker():
 
 async def main():
     logger.info("Bot iniciado...")
-    await send_to_channel("🤖 Bot online – validação por sticker + envio mais antecipado")
+    await send_to_channel("🤖 BOT INICIADO 🤖")
     await api_worker()
 
 if __name__ == "__main__":
