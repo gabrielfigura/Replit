@@ -364,8 +364,7 @@ async def resolve_after_result():
         # Mensagem de Green por texto (sem sticker)
         green_text = (
             "✅GREEN✅\n"
-            "🤖MAIS FOCO E MENOS GANÂNCIA🤖\n"
-            f"🔵= {state['total_greens']} & 🔴= {state['total_losses']}"
+            "🤖MAIS FOCO E MENOS GANÂNCIA🤖"
         )
         await send_to_channel(green_text)
         await send_to_channel(format_placar())
