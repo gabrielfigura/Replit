@@ -39,10 +39,7 @@ OUTCOME_MAP = {
 }
 
 # ─── TIMING CORRIGIDO ───
-# Poll rápido (2s) para detectar mudança de rodada o mais cedo possível.
-# Sem delay fixo — o sinal é enviado IMEDIATAMENTE após detectar novo resultado.
 API_POLL_INTERVAL = 2.0
-# Cooldown apenas para evitar duplicação, não para atrasar o sinal.
 SIGNAL_COOLDOWN_DURATION = 5
 
 STATE_FILE = "bot_state.json"
@@ -54,6 +51,10 @@ logging.basicConfig(
 
 logger = logging.getLogger("BacBoBot")
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
+# ─── STICKERS ───
+GREEN_STICKER_ID = "CAACAgEAAxkBAAMEabgkKtcniqUmvsslUXGIxeotNJUAAucFAAKI8vFGUAABY6O9nCdgOgQ"
+LOSS_STICKER_ID = "CAACAgEAAxkBAAMFabgkoGh5GBLnZhz6GZo0quOYvJkAAlIGAAJ8lPBGs1rHcUE1tXQ6BA"
 
 state: Dict[str, Any] = {
     "history": [],
@@ -80,8 +81,6 @@ state: Dict[str, Any] = {
     "last_result_round_id": None,
     "player_score_last": None,
     "banker_score_last": None,
-    # Flag removida: "new_result_added" já não controla o timing.
-    # Agora usamos detecção direta de mudança de round_id.
 }
 
 
@@ -132,6 +131,18 @@ async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
         return msg.message_id
     except Exception as e:
         logger.error(f"Erro ao enviar texto: {e}")
+        return None
+
+
+async def send_sticker_to_channel(sticker_id: str) -> Optional[int]:
+    try:
+        msg = await bot.send_sticker(
+            chat_id=TELEGRAM_CHANNEL_ID,
+            sticker=sticker_id
+        )
+        return msg.message_id
+    except Exception as e:
+        logger.error(f"Erro ao enviar sticker: {e}")
         return None
 
 
@@ -194,9 +205,6 @@ async def fetch_api(session: aiohttp.ClientSession) -> Optional[Dict]:
         return None
 
 
-# ─── TIMING CORRIGIDO: update_history_from_api ───
-# Retorna True se uma NOVA rodada foi detectada, False caso contrário.
-# Isso permite ao loop principal reagir imediatamente.
 async def update_history_from_api(session) -> bool:
     data = await fetch_api(session)
     if not data:
@@ -212,7 +220,6 @@ async def update_history_from_api(session) -> bool:
         if not round_id:
             return False
 
-        # Se o round_id é o mesmo, não há rodada nova
         if state["last_round_id"] == round_id:
             return False
 
@@ -232,7 +239,6 @@ async def update_history_from_api(session) -> bool:
         if not outcome:
             return False
 
-        # ─── NOVA RODADA DETECTADA ───
         state["last_round_id"] = round_id
         state["history"].append(outcome)
         state["player_score_last"] = None
@@ -359,18 +365,13 @@ async def clear_gale_messages():
     state["martingale_message_ids"] = []
 
 
-# ─── TIMING CORRIGIDO: resolve_after_result ───
-# Chamada IMEDIATAMENTE quando nova rodada é detectada.
-# Não depende mais de flags — é chamada diretamente pelo loop.
 async def resolve_after_result():
     if not state.get("waiting_for_result") or not state.get("last_signal_color"):
         return
     if not state["history"]:
         return
-    # Verifica se já processamos este resultado
     if state["last_result_round_id"] == state["last_round_id"]:
         return
-    # Garante que o resultado é posterior ao sinal
     if state["last_signal_round_id"] and state["last_signal_round_id"] >= state["last_round_id"]:
         return
 
@@ -387,11 +388,7 @@ async def resolve_after_result():
         elif state["martingale_count"] == 1: state["greens_gale_1"] += 1
         elif state["martingale_count"] == 2: state["greens_gale_2"] += 1
 
-        green_text = (
-            "✅GREEN✅\n"
-            "🤖MAIS FOCO E MENOS GANÂNCIA🤖"
-        )
-        await send_to_channel(green_text)
+        await send_sticker_to_channel(GREEN_STICKER_ID)
         await send_to_channel(format_placar())
         await clear_gale_messages()
 
@@ -403,7 +400,6 @@ async def resolve_after_result():
             "last_signal_pattern": None,
             "last_signal_sequence": None,
             "last_signal_round_id": None,
-            # CORRIGIDO: cooldown curto para permitir novo sinal rápido
             "signal_cooldown_until": datetime.now().timestamp() + 2
         })
         save_state()
@@ -418,7 +414,7 @@ async def resolve_after_result():
     if state["martingale_count"] >= 3:
         state["greens_seguidos"] = 0
         state["total_losses"] += 1
-        await send_to_channel("🟥 <b>LOSS</b> 🟥")
+        await send_sticker_to_channel(LOSS_STICKER_ID)
         await send_to_channel(format_placar())
         await clear_gale_messages()
 
@@ -430,7 +426,6 @@ async def resolve_after_result():
             "last_signal_pattern": None,
             "last_signal_sequence": None,
             "last_signal_round_id": None,
-            # CORRIGIDO: cooldown curto após loss também
             "signal_cooldown_until": datetime.now().timestamp() + 2
         })
         save_state()
@@ -438,10 +433,6 @@ async def resolve_after_result():
     await refresh_analise_message()
 
 
-# ─── TIMING CORRIGIDO: try_send_signal ───
-# Chamada IMEDIATAMENTE após detectar nova rodada e resolver resultado anterior.
-# Sem delay fixo — o sinal sai no instante em que a análise é feita.
-# O jogador recebe o sinal durante o betting time da próxima rodada.
 async def try_send_signal():
     now = datetime.now().timestamp()
     if state["waiting_for_result"]:
@@ -470,9 +461,6 @@ async def try_send_signal():
     await delete_analise_message()
     state["martingale_message_ids"] = []
 
-    # ─── SINAL ENVIADO IMEDIATAMENTE ───
-    # Nenhum sleep aqui. O sinal sai assim que a análise termina,
-    # que é logo após detectar o fim da rodada anterior.
     msg_id = await send_to_channel(main_entry_text(cor))
     if msg_id:
         state["entrada_message_id"] = msg_id
@@ -486,32 +474,17 @@ async def try_send_signal():
         logger.info(f"⚡ SINAL ENVIADO → {cor} ({padrao}) — durante betting time")
 
 
-# ─── TIMING CORRIGIDO: api_worker (LOOP PRINCIPAL) ───
-# Fluxo correto:
-#   1. Poll rápido (2s) para detectar nova rodada
-#   2. Quando nova rodada detectada:
-#      a) Resolver resultado anterior (green/gale/loss)
-#      b) Enviar novo sinal IMEDIATAMENTE (durante betting time)
-#   3. Se não há rodada nova, apenas dorme e tenta de novo
-#
-# RESULTADO SAI → BOT ANALISA → ENVIA SINAL → NOVA RODADA COMEÇA
 async def api_worker():
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                # 1. Verificar se há nova rodada
                 nova_rodada = await update_history_from_api(session)
 
                 if nova_rodada:
-                    # 2a. Resolver sinal anterior imediatamente
                     await resolve_after_result()
-                    # Pequena pausa para o Telegram processar
                     await asyncio.sleep(0.3)
-                    # 2b. Tentar enviar novo sinal AGORA (betting time)
                     await try_send_signal()
 
-                # 3. Dormir e verificar de novo
-                # Poll a cada 2s para detectar mudanças rápido
                 await asyncio.sleep(API_POLL_INTERVAL)
 
             except Exception as e:
