@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import json
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import pytz
@@ -25,6 +26,7 @@ HEADERS = {
 }
 
 ANGOLA_TZ = pytz.timezone('Africa/Luanda')
+STATE_FILE = "bot_state.json"
 
 OUTCOME_MAP = {
     "PlayerWon": "🔵",
@@ -38,8 +40,7 @@ OUTCOME_MAP = {
 }
 
 API_POLL_INTERVAL = 4.2
-SIGNAL_COOLDOWN_DURATION = 7
-SIGNAL_DELAY_AFTER_RESULT = 3.0  # Espera 3s após resultado → sinal chega ~7s antes da próxima rodada
+SIGNAL_COOLDOWN_DURATION = 9
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,6 +52,7 @@ bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 state: Dict[str, Any] = {
     "history": [],
+    "history_times": [],
     "last_round_id": None,
     "waiting_for_result": False,
     "last_signal_color": None,
@@ -69,13 +71,43 @@ state: Dict[str, Any] = {
     "last_signal_round_id": None,
     "signal_cooldown_until": 0.0,
     "analise_message_id": None,
-    "last_reset_date": None,
     "last_analise_refresh": 0.0,
     "last_result_round_id": None,
     "player_score_last": None,
     "banker_score_last": None,
     "new_result_added": False,
 }
+
+# ────────────────────────────────────────
+# PERSISTÊNCIA DO PLACAR (NUNCA ZERA)
+# ────────────────────────────────────────
+
+PERSISTENT_KEYS = [
+    "total_greens", "greens_sem_gale", "greens_gale_1", "greens_gale_2",
+    "total_empates", "total_losses", "greens_seguidos", "last_round_id"
+]
+
+def save_state():
+    """Salva o placar em arquivo JSON para nunca perder entre reinícios."""
+    try:
+        to_save = {k: state[k] for k in PERSISTENT_KEYS}
+        with open(STATE_FILE, "w") as f:
+            json.dump(to_save, f, indent=2)
+        logger.info(f"Placar salvo: 🟢{state['total_greens']} 🔴{state['total_losses']}")
+    except Exception as e:
+        logger.error(f"Erro ao salvar placar: {e}")
+
+def load_state():
+    """Carrega o placar salvo anteriormente. Nunca zera."""
+    try:
+        with open(STATE_FILE, "r") as f:
+            saved = json.load(f)
+            state.update(saved)
+            logger.info(f"Placar carregado: 🟢{state['total_greens']} 🔴{state['total_losses']} | Seguidos: {state['greens_seguidos']}")
+    except FileNotFoundError:
+        logger.info("Nenhum placar anterior encontrado. Começando do zero.")
+    except Exception as e:
+        logger.error(f"Erro ao carregar placar: {e}")
 
 
 async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
@@ -108,24 +140,15 @@ async def delete_messages(message_ids: List[int]):
             pass
 
 
-def should_reset_placar() -> bool:
-    now = datetime.now(ANGOLA_TZ)
-    if state["last_reset_date"] != now.date():
-        state["last_reset_date"] = now.date()
-        return True
-    return False
-
-
-
 def calcular_acertividade() -> str:
     total = state["total_greens"] + state["total_losses"]
-    return "—" if total == 0 else f"{(state['total_greens'] / total * 100):.2f}%"
+    return "0.00%" if total == 0 else f"{(state['total_greens'] / total * 100):.2f}%"
 
 
 def format_placar() -> str:
     acert = calcular_acertividade()
     return (
-        f"📊 Placar atual 🟢 {state['total_greens']} 🔴 {state['total_losses']}\n"
+        f"📊 <b>Histórico Total</b> 🟢 {state['total_greens']} 🔴 {state['total_losses']}\n"
         f"✅ Assertividade {acert}\n"
         f"🏆 {state['greens_seguidos']} Greens seguidos"
     )
@@ -158,8 +181,26 @@ async def fetch_api(session: aiohttp.ClientSession) -> Optional[Dict]:
         return None
 
 
+def calcular_intervalo_medio() -> float:
+    """Calcula o intervalo médio entre rodadas baseado nos últimos resultados."""
+    times = state.get("history_times", [])
+    if len(times) < 3:
+        return 33.0  # fallback ~33 segundos
+
+    intervals = []
+    for i in range(1, min(8, len(times))):
+        diff = (times[i - 1] - times[i]).total_seconds()
+        if 20 < diff < 60:
+            intervals.append(diff)
+
+    if not intervals:
+        return 33.0
+
+    return sum(intervals) / len(intervals)
+
+
 async def update_history_from_api(session):
-    reset_placar_if_needed()
+    # SEM reset de placar — nunca zera!
     data = await fetch_api(session)
     if not data:
         return
@@ -176,27 +217,77 @@ async def update_history_from_api(session):
             if not outcome_raw:
                 return
 
+            score = latest.get("score")
+            created_at_str = latest.get("createdAt")
+
             outcome = OUTCOME_MAP.get(outcome_raw)
             if not outcome:
                 s = str(outcome_raw or "").lower()
-                if "player" in s:
-                    outcome = "🔵"
-                elif "banker" in s:
-                    outcome = "🔴"
-                elif any(x in s for x in ["tie", "empate", "draw"]):
-                    outcome = "🟡"
+                if "player" in s: outcome = "🔵"
+                elif "banker" in s: outcome = "🔴"
+                elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
 
             if outcome and state["last_round_id"] != round_id:
                 state["last_round_id"] = round_id
                 state["history"].append(outcome)
                 state["player_score_last"] = None
                 state["banker_score_last"] = None
+
+                # Guardar timestamp para calcular intervalo
+                if created_at_str:
+                    try:
+                        dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                        state["history_times"].insert(0, dt)
+                        if len(state["history_times"]) > 20:
+                            state["history_times"].pop()
+                    except:
+                        pass
+
+                if len(state["history"]) > 200:
+                    state["history"].pop(0)
+                logger.info(f"Resultado novo: {outcome} (round {round_id}, score={score})")
+                state["new_result_added"] = True
+                state["signal_cooldown_until"] = datetime.now().timestamp() + 1.5
+
+        elif isinstance(items, dict):
+            round_id = items.get("id")
+            if not round_id:
+                return
+
+            outcome_raw = (items.get("result") or {}).get("outcome") if isinstance(items.get("result"), dict) else items.get("result")
+            if not outcome_raw:
+                return
+
+            player_dice = banker_dice = None
+            if isinstance(items.get("result"), dict):
+                result = items.get("result") or {}
+                pl = result.get("player") or result.get("playerDice") or {}
+                bk = result.get("banker") or result.get("bankerDice") or {}
+                for k in ("score", "sum", "total", "points"):
+                    if k in pl: player_dice = pl[k]
+                    if k in bk: banker_dice = bk[k]
+
+            outcome = OUTCOME_MAP.get(outcome_raw)
+            if not outcome:
+                s = str(outcome_raw or "").lower()
+                if "player" in s: outcome = "🔵"
+                elif "banker" in s: outcome = "🔴"
+                elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
+
+            if outcome and state["last_round_id"] != round_id:
+                state["last_round_id"] = round_id
+                state["history"].append(outcome)
+                if player_dice is not None and banker_dice is not None:
+                    state["player_score_last"] = player_dice
+                    state["banker_score_last"] = banker_dice
+                else:
+                    state["player_score_last"] = None
+                    state["banker_score_last"] = None
                 if len(state["history"]) > 200:
                     state["history"].pop(0)
                 logger.info(f"Resultado novo: {outcome} (round {round_id})")
                 state["new_result_added"] = True
-                # Delay de 3s para que o sinal chegue ~7s antes da próxima rodada
-                state["signal_cooldown_until"] = datetime.now().timestamp() + SIGNAL_DELAY_AFTER_RESULT
+                state["signal_cooldown_until"] = datetime.now().timestamp() + 1.5
 
     except Exception as e:
         logger.debug(f"Erro processando API: {e}")
@@ -294,11 +385,12 @@ def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=N
     return None, None
 
 
-def main_entry_text(color: str) -> str:
+def main_entry_text(color: str, round_id=None) -> str:
+    round_info = f"\n<code>Round: #{round_id}</code>" if round_id else ""
     return (
-        f"🎲 ENTRADA CONFIRMADA 🎲\n"
+        f"🎲 <b>ENTRADA CONFIRMADA</b> 🎲\n"
         f"APOSTA NA COR: {color}\n"
-        f"PROTEJA O TIE 🟡"
+        f"PROTEJA O TIE 🟡{round_info}"
     )
 
 
@@ -323,13 +415,11 @@ async def resolve_after_result():
         return
     if not state["history"]:
         return
-
     if state["last_signal_round_id"] >= state["last_round_id"]:
         return
 
     last_outcome = state["history"][-1]
     state["last_result_round_id"] = state["last_round_id"]
-
     target = state["last_signal_color"]
     acertou = last_outcome == target
     is_tie = last_outcome == "🟡"
@@ -337,22 +427,20 @@ async def resolve_after_result():
     if acertou or is_tie:
         state["total_greens"] += 1
         state["greens_seguidos"] += 1
-        if state["martingale_count"] == 0:
-            state["greens_sem_gale"] += 1
-        elif state["martingale_count"] == 1:
-            state["greens_gale_1"] += 1
-        elif state["martingale_count"] == 2:
-            state["greens_gale_2"] += 1
+        if state["martingale_count"] == 0: state["greens_sem_gale"] += 1
+        elif state["martingale_count"] == 1: state["greens_gale_1"] += 1
+        elif state["martingale_count"] == 2: state["greens_gale_2"] += 1
 
-        # Mensagem de GREEN com totais acumulados
         green_text = (
             "✅GREEN✅\n"
-            "🤖MAIS FOCO E MENOS GANÂNCIA🤖\n\n"
-            f"🔵= {state['total_greens']} & 🔴= {state['total_losses']}"
+            "🤖MAIS FOCO E MENOS GANÂNCIA🤖"
         )
         await send_to_channel(green_text)
         await send_to_channel(format_placar())
         await clear_gale_messages()
+
+        # Salvar placar após green (NUNCA ZERA)
+        save_state()
 
         state.update({
             "waiting_for_result": False,
@@ -378,6 +466,9 @@ async def resolve_after_result():
         await send_to_channel("🟥 <b>LOSS</b> 🟥")
         await send_to_channel(format_placar())
         await clear_gale_messages()
+
+        # Salvar placar após loss (NUNCA ZERA)
+        save_state()
 
         state.update({
             "waiting_for_result": False,
@@ -425,7 +516,33 @@ async def try_send_signal():
     await delete_analise_message()
     state["martingale_message_ids"] = []
 
-    msg_id = await send_to_channel(main_entry_text(cor))
+    # ────────────────────────────────────────
+    # ENVIAR SINAL 7 SEGUNDOS ANTES DA RODADA
+    # ────────────────────────────────────────
+    avg_interval = calcular_intervalo_medio()
+    times = state.get("history_times", [])
+
+    if len(times) >= 2:
+        elapsed = (datetime.now(pytz.utc) - times[0]).total_seconds()
+        wait_time = avg_interval - elapsed - 7  # 7 segundos antes
+
+        if 0 < wait_time < 45:
+            # Enviar aviso de preparação
+            prep_msg_id = await send_to_channel(
+                "⏳ <b>PREPARANDO ENTRADA...</b>\n"
+                "<i>Sinal em breve, fique atento!</i>"
+            )
+            logger.info(f"Aguardando {wait_time:.1f}s para enviar sinal 7s antes da rodada (intervalo médio: {avg_interval:.1f}s)")
+            await asyncio.sleep(wait_time)
+
+            # Apagar mensagem de preparação
+            if prep_msg_id:
+                await delete_messages([prep_msg_id])
+        elif wait_time <= 0:
+            # Já está dentro da janela, enviar imediatamente
+            logger.info("Janela de 7s já passou, enviando sinal imediatamente")
+
+    msg_id = await send_to_channel(main_entry_text(cor, state.get("last_round_id")))
     if msg_id:
         state["entrada_message_id"] = msg_id
         state["waiting_for_result"] = True
@@ -452,8 +569,15 @@ async def api_worker():
 
 
 async def main():
+    # Carregar placar anterior (NUNCA ZERA)
+    load_state()
+
     logger.info("Bot iniciado...")
-    await send_to_channel("🤖 BOT INICIADO🤖")
+    placar_info = f"🟢{state['total_greens']} 🔴{state['total_losses']}"
+    await send_to_channel(
+        f"🤖 <b>BOT INICIADO</b> 🤖\n"
+        f"📊 Histórico Total: {placar_info}"
+    )
     await api_worker()
 
 
@@ -462,5 +586,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot parado pelo usuário")
+        save_state()
     except Exception as e:
         logger.critical("Erro fatal", exc_info=True)
+        save_state()
