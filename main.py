@@ -22,9 +22,7 @@ HEADERS = {
     'Accept': 'application/json',
     'Accept-Language': 'en-US,en;q=0.9',
 }
-
 ANGOLA_TZ = pytz.timezone('Africa/Luanda')
-
 OUTCOME_MAP = {
     "PlayerWon": "🔵",
     "BankerWon": "🔴",
@@ -46,7 +44,6 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)-5s | %(message)s'
 )
 logger = logging.getLogger("BacBoBot")
-
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 # ─── STICKERS ───
@@ -65,7 +62,6 @@ state: Dict[str, Any] = {
     "total_greens": 0,
     "greens_sem_gale": 0,
     "greens_gale_1": 0,
-    "greens_gale_2": 0,
     "total_empates": 0,
     "total_losses": 0,
     "last_signal_pattern": None,
@@ -87,7 +83,6 @@ def save_state():
             "total_greens": state["total_greens"],
             "greens_sem_gale": state["greens_sem_gale"],
             "greens_gale_1": state["greens_gale_1"],
-            "greens_gale_2": state["greens_gale_2"],
             "total_empates": state["total_empates"],
             "total_losses": state["total_losses"],
             "greens_seguidos": state["greens_seguidos"],
@@ -101,7 +96,7 @@ def load_state():
     try:
         with open(STATE_FILE, "r") as f:
             data = json.load(f)
-        for k in ["total_greens", "greens_sem_gale", "greens_gale_1", "greens_gale_2",
+        for k in ["total_greens", "greens_sem_gale", "greens_gale_1",
                    "total_empates", "total_losses", "greens_seguidos"]:
             if k in data:
                 state[k] = data[k]
@@ -302,13 +297,27 @@ def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=N
 
 def main_entry_text(color: str) -> str:
     return (
-        f"🎲 ENTRADA CONFIRMADA 🎲\n"
-        f"APOSTA NA COR: {color}\n"
-        f"PROTEJA O TIE 🟡"
+        f"🧠 | Sinal confirmado\n"
+        f"🎲 | Mesa Bacbo live\n"
+        f"⚔️ | Aposte no {color} + 🟠\n"
+        f"♻️ | Fazer máximo G1\n"
+        f"💻 | Abra o jogo pelo link abaixo ⤵️\n"
+        f"\n"
+        f"🎁 Bónus de boas-vindas para novos jogadores 🇵🇹\n"
+        f"\n"
+        f"💰 Depósito mínimo: 10 €\n"
+        f"\n"
+        f"🎰 Casino online (inclui Bac Bo)\n"
+        f"\n"
+        f"🔐 Plataforma confiável\n"
+        f"\n"
+        f"👉 Regista-te aqui: BETILT\n"
+        f"\n"
+        f"https://btt-pt.hopghpfa.com/pt/casino?partner=p8506p33116p4649#registration-bonus"
     )
 
 async def send_gale_warning(level: int):
-    if level not in (1, 2):
+    if level != 1:
         return
     text = f"🔄 <b>GALE {level}</b> 🔄\nContinuar na mesma cor!"
     msg_id = await send_to_channel(text)
@@ -333,12 +342,12 @@ async def resolve_after_result():
     target = state["last_signal_color"]
     acertou = last_outcome == target
     is_tie = last_outcome == "🟡"
+
     if acertou or is_tie:
         state["total_greens"] += 1
         state["greens_seguidos"] += 1
         if state["martingale_count"] == 0: state["greens_sem_gale"] += 1
         elif state["martingale_count"] == 1: state["greens_gale_1"] += 1
-        elif state["martingale_count"] == 2: state["greens_gale_2"] += 1
         await send_sticker_to_channel(GREEN_STICKER_ID)
         await send_to_channel(format_placar())
         await clear_gale_messages()
@@ -354,12 +363,13 @@ async def resolve_after_result():
         })
         save_state()
         return
+
     state["martingale_count"] += 1
+
     if state["martingale_count"] == 1:
         await send_gale_warning(1)
-    elif state["martingale_count"] == 2:
-        await send_gale_warning(2)
-    if state["martingale_count"] >= 3:
+
+    if state["martingale_count"] >= 2:
         state["greens_seguidos"] = 0
         state["total_losses"] += 1
         await send_sticker_to_channel(LOSS_STICKER_ID)
@@ -376,6 +386,7 @@ async def resolve_after_result():
             "signal_cooldown_until": datetime.now().timestamp() + 2
         })
         save_state()
+
     await refresh_analise_message()
 
 async def try_send_signal():
