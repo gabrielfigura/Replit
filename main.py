@@ -1,7 +1,7 @@
 import os
+import json
 import asyncio
 import logging
-import json
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import pytz
@@ -26,7 +26,6 @@ HEADERS = {
 }
 
 ANGOLA_TZ = pytz.timezone('Africa/Luanda')
-STATE_FILE = "bot_state.json"
 
 OUTCOME_MAP = {
     "PlayerWon": "🔵",
@@ -39,8 +38,14 @@ OUTCOME_MAP = {
     "🟡": "🟡",
 }
 
-API_POLL_INTERVAL = 4.2
-SIGNAL_COOLDOWN_DURATION = 9
+# ─── TIMING CORRIGIDO ───
+# Poll rápido (2s) para detectar mudança de rodada o mais cedo possível.
+# Sem delay fixo — o sinal é enviado IMEDIATAMENTE após detectar novo resultado.
+API_POLL_INTERVAL = 2.0
+# Cooldown apenas para evitar duplicação, não para atrasar o sinal.
+SIGNAL_COOLDOWN_DURATION = 5
+
+STATE_FILE = "bot_state.json"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,7 +57,6 @@ bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 state: Dict[str, Any] = {
     "history": [],
-    "history_times": [],
     "last_round_id": None,
     "waiting_for_result": False,
     "last_signal_color": None,
@@ -71,44 +75,51 @@ state: Dict[str, Any] = {
     "last_signal_round_id": None,
     "signal_cooldown_until": 0.0,
     "analise_message_id": None,
+    "last_reset_date": None,
     "last_analise_refresh": 0.0,
     "last_result_round_id": None,
     "player_score_last": None,
     "banker_score_last": None,
-    "new_result_added": False,
+    # Flag removida: "new_result_added" já não controla o timing.
+    # Agora usamos detecção direta de mudança de round_id.
 }
 
-# ────────────────────────────────────────
-# PERSISTÊNCIA DO PLACAR (NUNCA ZERA)
-# ────────────────────────────────────────
 
-PERSISTENT_KEYS = [
-    "total_greens", "greens_sem_gale", "greens_gale_1", "greens_gale_2",
-    "total_empates", "total_losses", "greens_seguidos", "last_round_id"
-]
+# ─── PERSISTÊNCIA DO PLACAR (nunca zera) ───
 
 def save_state():
-    """Salva o placar em arquivo JSON para nunca perder entre reinícios."""
     try:
-        to_save = {k: state[k] for k in PERSISTENT_KEYS}
+        data = {
+            "total_greens": state["total_greens"],
+            "greens_sem_gale": state["greens_sem_gale"],
+            "greens_gale_1": state["greens_gale_1"],
+            "greens_gale_2": state["greens_gale_2"],
+            "total_empates": state["total_empates"],
+            "total_losses": state["total_losses"],
+            "greens_seguidos": state["greens_seguidos"],
+        }
         with open(STATE_FILE, "w") as f:
-            json.dump(to_save, f, indent=2)
-        logger.info(f"Placar salvo: 🟢{state['total_greens']} 🔴{state['total_losses']}")
+            json.dump(data, f)
     except Exception as e:
-        logger.error(f"Erro ao salvar placar: {e}")
+        logger.debug(f"Erro ao salvar estado: {e}")
+
 
 def load_state():
-    """Carrega o placar salvo anteriormente. Nunca zera."""
     try:
         with open(STATE_FILE, "r") as f:
-            saved = json.load(f)
-            state.update(saved)
-            logger.info(f"Placar carregado: 🟢{state['total_greens']} 🔴{state['total_losses']} | Seguidos: {state['greens_seguidos']}")
+            data = json.load(f)
+        for k in ["total_greens", "greens_sem_gale", "greens_gale_1", "greens_gale_2",
+                   "total_empates", "total_losses", "greens_seguidos"]:
+            if k in data:
+                state[k] = data[k]
+        logger.info(f"Estado carregado: Greens={state['total_greens']} Losses={state['total_losses']}")
     except FileNotFoundError:
-        logger.info("Nenhum placar anterior encontrado. Começando do zero.")
+        logger.info("Nenhum estado anterior encontrado, começando do zero.")
     except Exception as e:
-        logger.error(f"Erro ao carregar placar: {e}")
+        logger.debug(f"Erro ao carregar estado: {e}")
 
+
+# ─── TELEGRAM HELPERS ───
 
 async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
     try:
@@ -148,7 +159,7 @@ def calcular_acertividade() -> str:
 def format_placar() -> str:
     acert = calcular_acertividade()
     return (
-        f"📊 <b>Histórico Total</b> 🟢 {state['total_greens']} 🔴 {state['total_losses']}\n"
+        f"📊 Placar atual 🟢 {state['total_greens']} 🔴 {state['total_losses']}\n"
         f"✅ Assertividade {acert}\n"
         f"🏆 {state['greens_seguidos']} Greens seguidos"
     )
@@ -171,9 +182,11 @@ async def delete_analise_message():
         state["analise_message_id"] = None
 
 
+# ─── API ───
+
 async def fetch_api(session: aiohttp.ClientSession) -> Optional[Dict]:
     try:
-        async with session.get(API_URL, headers=HEADERS, timeout=7) as resp:
+        async with session.get(API_URL, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=7)) as resp:
             if resp.status == 200:
                 return await resp.json()
             return None
@@ -181,121 +194,60 @@ async def fetch_api(session: aiohttp.ClientSession) -> Optional[Dict]:
         return None
 
 
-def calcular_intervalo_medio() -> float:
-    """Calcula o intervalo médio entre rodadas baseado nos últimos resultados."""
-    times = state.get("history_times", [])
-    if len(times) < 3:
-        return 33.0  # fallback ~33 segundos
-
-    intervals = []
-    for i in range(1, min(8, len(times))):
-        diff = (times[i - 1] - times[i]).total_seconds()
-        if 20 < diff < 60:
-            intervals.append(diff)
-
-    if not intervals:
-        return 33.0
-
-    return sum(intervals) / len(intervals)
-
-
-async def update_history_from_api(session):
-    # SEM reset de placar — nunca zera!
+# ─── TIMING CORRIGIDO: update_history_from_api ───
+# Retorna True se uma NOVA rodada foi detectada, False caso contrário.
+# Isso permite ao loop principal reagir imediatamente.
+async def update_history_from_api(session) -> bool:
     data = await fetch_api(session)
     if not data:
-        return
+        return False
 
     try:
         items = data.get("data", [])
-        if isinstance(items, list) and len(items) > 0:
-            latest = items[0]
-            round_id = latest.get("id")
-            if not round_id:
-                return
+        if not isinstance(items, list) or len(items) == 0:
+            return False
 
-            outcome_raw = latest.get("result")
-            if not outcome_raw:
-                return
+        latest = items[0]
+        round_id = latest.get("id")
+        if not round_id:
+            return False
 
-            score = latest.get("score")
-            created_at_str = latest.get("createdAt")
+        # Se o round_id é o mesmo, não há rodada nova
+        if state["last_round_id"] == round_id:
+            return False
 
-            outcome = OUTCOME_MAP.get(outcome_raw)
-            if not outcome:
-                s = str(outcome_raw or "").lower()
-                if "player" in s: outcome = "🔵"
-                elif "banker" in s: outcome = "🔴"
-                elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
+        outcome_raw = latest.get("result")
+        if not outcome_raw:
+            return False
 
-            if outcome and state["last_round_id"] != round_id:
-                state["last_round_id"] = round_id
-                state["history"].append(outcome)
-                state["player_score_last"] = None
-                state["banker_score_last"] = None
+        score = latest.get("score")
 
-                # Guardar timestamp para calcular intervalo
-                if created_at_str:
-                    try:
-                        dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                        state["history_times"].insert(0, dt)
-                        if len(state["history_times"]) > 20:
-                            state["history_times"].pop()
-                    except:
-                        pass
+        outcome = OUTCOME_MAP.get(outcome_raw)
+        if not outcome:
+            s = str(outcome_raw or "").lower()
+            if "player" in s: outcome = "🔵"
+            elif "banker" in s: outcome = "🔴"
+            elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
 
-                if len(state["history"]) > 200:
-                    state["history"].pop(0)
-                logger.info(f"Resultado novo: {outcome} (round {round_id}, score={score})")
-                state["new_result_added"] = True
-                state["signal_cooldown_until"] = datetime.now().timestamp() + 1.5
+        if not outcome:
+            return False
 
-        elif isinstance(items, dict):
-            round_id = items.get("id")
-            if not round_id:
-                return
-
-            outcome_raw = (items.get("result") or {}).get("outcome") if isinstance(items.get("result"), dict) else items.get("result")
-            if not outcome_raw:
-                return
-
-            player_dice = banker_dice = None
-            if isinstance(items.get("result"), dict):
-                result = items.get("result") or {}
-                pl = result.get("player") or result.get("playerDice") or {}
-                bk = result.get("banker") or result.get("bankerDice") or {}
-                for k in ("score", "sum", "total", "points"):
-                    if k in pl: player_dice = pl[k]
-                    if k in bk: banker_dice = bk[k]
-
-            outcome = OUTCOME_MAP.get(outcome_raw)
-            if not outcome:
-                s = str(outcome_raw or "").lower()
-                if "player" in s: outcome = "🔵"
-                elif "banker" in s: outcome = "🔴"
-                elif any(x in s for x in ["tie", "empate", "draw"]): outcome = "🟡"
-
-            if outcome and state["last_round_id"] != round_id:
-                state["last_round_id"] = round_id
-                state["history"].append(outcome)
-                if player_dice is not None and banker_dice is not None:
-                    state["player_score_last"] = player_dice
-                    state["banker_score_last"] = banker_dice
-                else:
-                    state["player_score_last"] = None
-                    state["banker_score_last"] = None
-                if len(state["history"]) > 200:
-                    state["history"].pop(0)
-                logger.info(f"Resultado novo: {outcome} (round {round_id})")
-                state["new_result_added"] = True
-                state["signal_cooldown_until"] = datetime.now().timestamp() + 1.5
+        # ─── NOVA RODADA DETECTADA ───
+        state["last_round_id"] = round_id
+        state["history"].append(outcome)
+        state["player_score_last"] = None
+        state["banker_score_last"] = None
+        if len(state["history"]) > 200:
+            state["history"].pop(0)
+        logger.info(f"🔔 NOVA RODADA DETECTADA: {outcome} (round {round_id}, score={score})")
+        return True
 
     except Exception as e:
         logger.debug(f"Erro processando API: {e}")
+        return False
 
 
-# ────────────────────────────────────────
-# ESTRATÉGIAS
-# ────────────────────────────────────────
+# ─── ESTRATÉGIAS (SEM ALTERAÇÃO) ───
 
 def oposto(cor: str) -> str:
     return "🔵" if cor == "🔴" else "🔴"
@@ -385,12 +337,11 @@ def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=N
     return None, None
 
 
-def main_entry_text(color: str, round_id=None) -> str:
-    round_info = f"\n<code>Round: #{round_id}</code>" if round_id else ""
+def main_entry_text(color: str) -> str:
     return (
-        f"🎲 <b>ENTRADA CONFIRMADA</b> 🎲\n"
+        f"🎲 ENTRADA CONFIRMADA 🎲\n"
         f"APOSTA NA COR: {color}\n"
-        f"PROTEJA O TIE 🟡{round_info}"
+        f"PROTEJA O TIE 🟡"
     )
 
 
@@ -408,14 +359,19 @@ async def clear_gale_messages():
     state["martingale_message_ids"] = []
 
 
+# ─── TIMING CORRIGIDO: resolve_after_result ───
+# Chamada IMEDIATAMENTE quando nova rodada é detectada.
+# Não depende mais de flags — é chamada diretamente pelo loop.
 async def resolve_after_result():
     if not state.get("waiting_for_result") or not state.get("last_signal_color"):
         return
-    if state["last_result_round_id"] == state["last_round_id"]:
-        return
     if not state["history"]:
         return
-    if state["last_signal_round_id"] >= state["last_round_id"]:
+    # Verifica se já processamos este resultado
+    if state["last_result_round_id"] == state["last_round_id"]:
+        return
+    # Garante que o resultado é posterior ao sinal
+    if state["last_signal_round_id"] and state["last_signal_round_id"] >= state["last_round_id"]:
         return
 
     last_outcome = state["history"][-1]
@@ -439,9 +395,6 @@ async def resolve_after_result():
         await send_to_channel(format_placar())
         await clear_gale_messages()
 
-        # Salvar placar após green (NUNCA ZERA)
-        save_state()
-
         state.update({
             "waiting_for_result": False,
             "last_signal_color": None,
@@ -450,8 +403,10 @@ async def resolve_after_result():
             "last_signal_pattern": None,
             "last_signal_sequence": None,
             "last_signal_round_id": None,
-            "signal_cooldown_until": datetime.now().timestamp() + SIGNAL_COOLDOWN_DURATION
+            # CORRIGIDO: cooldown curto para permitir novo sinal rápido
+            "signal_cooldown_until": datetime.now().timestamp() + 2
         })
+        save_state()
         return
 
     state["martingale_count"] += 1
@@ -467,9 +422,6 @@ async def resolve_after_result():
         await send_to_channel(format_placar())
         await clear_gale_messages()
 
-        # Salvar placar após loss (NUNCA ZERA)
-        save_state()
-
         state.update({
             "waiting_for_result": False,
             "last_signal_color": None,
@@ -478,12 +430,18 @@ async def resolve_after_result():
             "last_signal_pattern": None,
             "last_signal_sequence": None,
             "last_signal_round_id": None,
-            "signal_cooldown_until": datetime.now().timestamp() + SIGNAL_COOLDOWN_DURATION
+            # CORRIGIDO: cooldown curto após loss também
+            "signal_cooldown_until": datetime.now().timestamp() + 2
         })
+        save_state()
 
     await refresh_analise_message()
 
 
+# ─── TIMING CORRIGIDO: try_send_signal ───
+# Chamada IMEDIATAMENTE após detectar nova rodada e resolver resultado anterior.
+# Sem delay fixo — o sinal sai no instante em que a análise é feita.
+# O jogador recebe o sinal durante o betting time da próxima rodada.
 async def try_send_signal():
     now = datetime.now().timestamp()
     if state["waiting_for_result"]:
@@ -493,10 +451,6 @@ async def try_send_signal():
         return
     if len(state["history"]) < 3:
         return
-    if not state["new_result_added"]:
-        return
-
-    state["new_result_added"] = False
 
     padrao, cor = gerar_sinal_estrategia(
         state["history"],
@@ -516,33 +470,10 @@ async def try_send_signal():
     await delete_analise_message()
     state["martingale_message_ids"] = []
 
-    # ────────────────────────────────────────
-    # ENVIAR SINAL 7 SEGUNDOS ANTES DA RODADA
-    # ────────────────────────────────────────
-    avg_interval = calcular_intervalo_medio()
-    times = state.get("history_times", [])
-
-    if len(times) >= 2:
-        elapsed = (datetime.now(pytz.utc) - times[0]).total_seconds()
-        wait_time = avg_interval - elapsed - 7  # 7 segundos antes
-
-        if 0 < wait_time < 45:
-            # Enviar aviso de preparação
-            prep_msg_id = await send_to_channel(
-                "⏳ <b>PREPARANDO ENTRADA...</b>\n"
-                "<i>Sinal em breve, fique atento!</i>"
-            )
-            logger.info(f"Aguardando {wait_time:.1f}s para enviar sinal 7s antes da rodada (intervalo médio: {avg_interval:.1f}s)")
-            await asyncio.sleep(wait_time)
-
-            # Apagar mensagem de preparação
-            if prep_msg_id:
-                await delete_messages([prep_msg_id])
-        elif wait_time <= 0:
-            # Já está dentro da janela, enviar imediatamente
-            logger.info("Janela de 7s já passou, enviando sinal imediatamente")
-
-    msg_id = await send_to_channel(main_entry_text(cor, state.get("last_round_id")))
+    # ─── SINAL ENVIADO IMEDIATAMENTE ───
+    # Nenhum sleep aqui. O sinal sai assim que a análise termina,
+    # que é logo após detectar o fim da rodada anterior.
+    msg_id = await send_to_channel(main_entry_text(cor))
     if msg_id:
         state["entrada_message_id"] = msg_id
         state["waiting_for_result"] = True
@@ -552,32 +483,47 @@ async def try_send_signal():
         state["last_signal_sequence"] = seq
         state["last_signal_round_id"] = state["last_round_id"]
         state["signal_cooldown_until"] = now + SIGNAL_COOLDOWN_DURATION
-        logger.info(f"Sinal enviado → {cor} ({padrao})")
+        logger.info(f"⚡ SINAL ENVIADO → {cor} ({padrao}) — durante betting time")
 
 
+# ─── TIMING CORRIGIDO: api_worker (LOOP PRINCIPAL) ───
+# Fluxo correto:
+#   1. Poll rápido (2s) para detectar nova rodada
+#   2. Quando nova rodada detectada:
+#      a) Resolver resultado anterior (green/gale/loss)
+#      b) Enviar novo sinal IMEDIATAMENTE (durante betting time)
+#   3. Se não há rodada nova, apenas dorme e tenta de novo
+#
+# RESULTADO SAI → BOT ANALISA → ENVIA SINAL → NOVA RODADA COMEÇA
 async def api_worker():
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                await update_history_from_api(session)
-                await asyncio.sleep(0.6)
-                await resolve_after_result()
-                await try_send_signal()
+                # 1. Verificar se há nova rodada
+                nova_rodada = await update_history_from_api(session)
+
+                if nova_rodada:
+                    # 2a. Resolver sinal anterior imediatamente
+                    await resolve_after_result()
+                    # Pequena pausa para o Telegram processar
+                    await asyncio.sleep(0.3)
+                    # 2b. Tentar enviar novo sinal AGORA (betting time)
+                    await try_send_signal()
+
+                # 3. Dormir e verificar de novo
+                # Poll a cada 2s para detectar mudanças rápido
+                await asyncio.sleep(API_POLL_INTERVAL)
+
             except Exception as e:
                 logger.debug(f"Erro loop principal: {e}")
-            await asyncio.sleep(API_POLL_INTERVAL)
+                await asyncio.sleep(API_POLL_INTERVAL)
 
 
 async def main():
-    # Carregar placar anterior (NUNCA ZERA)
     load_state()
-
     logger.info("Bot iniciado...")
-    placar_info = f"🟢{state['total_greens']} 🔴{state['total_losses']}"
-    await send_to_channel(
-        f"🤖 <b>BOT INICIADO</b> 🤖\n"
-        f"📊 Histórico Total: {placar_info}"
-    )
+    await send_to_channel("🤖 BOT INICIADO 🤖")
+    await refresh_analise_message()
     await api_worker()
 
 
@@ -586,7 +532,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot parado pelo usuário")
-        save_state()
     except Exception as e:
         logger.critical("Erro fatal", exc_info=True)
-        save_state()
