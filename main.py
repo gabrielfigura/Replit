@@ -34,7 +34,7 @@ OUTCOME_MAP = {
     "🟡": "🟡",
 }
 
-# ─── TIMING CORRIGIDO ───
+# ─── TIMING ───
 API_POLL_INTERVAL = 2.0
 SIGNAL_COOLDOWN_DURATION = 5
 STATE_FILE = "bot_state.json"
@@ -76,7 +76,7 @@ state: Dict[str, Any] = {
     "banker_score_last": None,
 }
 
-# ─── PERSISTÊNCIA DO PLACAR (nunca zera) ───
+# ─── PERSISTÊNCIA DO PLACAR ───
 def save_state():
     try:
         data = {
@@ -107,13 +107,13 @@ def load_state():
         logger.debug(f"Erro ao carregar estado: {e}")
 
 # ─── TELEGRAM HELPERS ───
-async def send_to_channel(text: str, parse_mode="HTML") -> Optional[int]:
+async def send_to_channel(text: str, parse_mode="HTML", disable_preview=True) -> Optional[int]:
     try:
         msg = await bot.send_message(
             chat_id=TELEGRAM_CHANNEL_ID,
             text=text,
             parse_mode=parse_mode,
-            disable_web_page_preview=True
+            disable_web_page_preview=disable_preview
         )
         return msg.message_id
     except Exception as e:
@@ -219,7 +219,7 @@ async def update_history_from_api(session) -> bool:
         logger.debug(f"Erro processando API: {e}")
         return False
 
-# ─── ESTRATÉGIAS (SEM ALTERAÇÃO) ───
+# ─── ESTRATÉGIAS ───
 def oposto(cor: str) -> str:
     return "🔵" if cor == "🔴" else "🔴"
 
@@ -295,6 +295,7 @@ def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=N
         return (nome, cor)
     return None, None
 
+# ─── MENSAGEM DE SINAL ───
 def main_entry_text(color: str) -> str:
     return (
         f"🧠 | Sinal confirmado\n"
@@ -302,8 +303,8 @@ def main_entry_text(color: str) -> str:
         f"⚔️ | Aposte no {color} + 🟠\n"
         f"♻️ | Fazer máximo G1\n"
         f"💻 | Abra o jogo pelo link abaixo ⤵️\n"
-
-        f"https://btt-pt.hopghpfa.com/pt/casino?partner=p8506p33116p4649#registration-bonus"
+        f"\n"
+        f'<a href="https://btt-pt.hopghpfa.com/pt/casino?partner=p8506p33116p4649#registration-bonus">👉 Regista-te aqui: BETILT</a>'
     )
 
 async def send_gale_warning(level: int):
@@ -402,7 +403,7 @@ async def try_send_signal():
         return
     await delete_analise_message()
     state["martingale_message_ids"] = []
-    msg_id = await send_to_channel(main_entry_text(cor))
+    msg_id = await send_to_channel(main_entry_text(cor), disable_preview=False)
     if msg_id:
         state["entrada_message_id"] = msg_id
         state["waiting_for_result"] = True
