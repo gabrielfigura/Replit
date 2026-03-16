@@ -302,17 +302,7 @@ def main_entry_text(color: str) -> str:
         f"⚔️ | Aposte no {color} + 🟠\n"
         f"♻️ | Fazer máximo G1\n"
         f"💻 | Abra o jogo pelo link abaixo ⤵️\n"
-        f"\n"
-        f"🎁 Bónus de boas-vindas para novos jogadores 🇵🇹\n"
-        f"\n"
-        f"💰 Depósito mínimo: 10 €\n"
-        f"\n"
-        f"🎰 Casino online (inclui Bac Bo)\n"
-        f"\n"
-        f"🔐 Plataforma confiável\n"
-        f"\n"
-        f"👉 Regista-te aqui: BETILT\n"
-        f"\n"
+
         f"https://btt-pt.hopghpfa.com/pt/casino?partner=p8506p33116p4649#registration-bonus"
     )
 
