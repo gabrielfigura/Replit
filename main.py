@@ -2,10 +2,10 @@ import os
 import json
 import asyncio
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 import pytz
-from collections import Counter
+from collections import Counter, defaultdict
 import aiohttp
 from telegram import Bot
 from telegram.error import TelegramError
@@ -97,7 +97,7 @@ def load_state():
         with open(STATE_FILE, "r") as f:
             data = json.load(f)
         for k in ["total_greens", "greens_sem_gale", "greens_gale_1",
-                   "total_empates", "total_losses", "greens_seguidos"]:
+                  "total_empates", "total_losses", "greens_seguidos"]:
             if k in data:
                 state[k] = data[k]
         logger.info(f"Estado carregado: Greens={state['total_greens']} Losses={state['total_losses']}")
@@ -219,81 +219,150 @@ async def update_history_from_api(session) -> bool:
         logger.debug(f"Erro processando API: {e}")
         return False
 
-# ─── ESTRATÉGIAS ───
+# ─── ESTRATÉGIAS VIP + MARKOV ───
+
 def oposto(cor: str) -> str:
     return "🔵" if cor == "🔴" else "🔴"
 
-def estrategia_maioria_recente(hist: List[str]):
-    if len(hist) < 3:
+
+def estrategia_tendencia(hist: List[str]) -> Optional[Tuple[str, str]]:
+    if len(hist) < 4:
         return None
-    window = hist[-min(4, len(hist)):]
-    cnt = Counter(x for x in window if x in ("🔵", "🔴"))
-    if not cnt:
+    last = hist[-4:]
+    cnt = Counter(last)
+    if cnt["🔵"] >= 3:
+        return ("Tendência Azul", "🔵")
+    if cnt["🔴"] >= 3:
+        return ("Tendência Vermelho", "🔴")
+    return None
+
+
+def estrategia_quebra_sequencia(hist: List[str]) -> Optional[Tuple[str, str]]:
+    if len(hist) < 4:
         return None
-    cor, qtd = cnt.most_common(1)[0]
-    if qtd >= 3 or qtd >= len(window) - 1:
-        return ("Maioria Recente", cor)
+    if hist[-1] == hist[-2] == hist[-3] == hist[-4]:
+        return ("Quebra 4x", oposto(hist[-1]))
     return None
 
-def estrategia_repeticao(hist: List[str]):
-    if len(hist) >= 3 and hist[-1] == hist[-2] == hist[-3] and hist[-1] in ("🔵", "🔴"):
-        return ("3x repetição → reversão", oposto(hist[-1]))
-    if len(hist) >= 2 and hist[-2] == hist[-1] and hist[-1] in ("🔵", "🔴"):
-        return ("2x repetição", hist[-1])
-    return None
 
-def estrategia_alternancia(hist: List[str]):
-    if len(hist) >= 4:
-        last = hist[-4:]
-        if all(x in ("🔵", "🔴") for x in last) and last[0] == last[2] and last[1] == last[3] and last[0] != last[1]:
-            return ("Alternância ABAB", oposto(last[-1]))
-    return None
-
-def estrategia_paridade(player_score, banker_score):
-    if player_score is None or banker_score is None:
+def estrategia_alternancia(hist: List[str]) -> Optional[Tuple[str, str]]:
+    if len(hist) < 4:
         return None
-    try:
-        ps = int(player_score)
-        bs = int(banker_score)
-        if ps > bs:
-            return ("Paridade", "🔵")
-        if bs > ps:
-            return ("Paridade", "🔴")
-    except:
-        pass
+    a, b, c, d = hist[-4:]
+    if a == c and b == d and a != b:
+        return ("Alternância ABAB", oposto(d))
     return None
 
-def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=None):
-    if len(history) < 3:
+
+def estrategia_2x1(hist: List[str]) -> Optional[Tuple[str, str]]:
+    if len(hist) < 6:
+        return None
+    seq = hist[-6:]
+    if seq[0] == seq[1] and seq[2] != seq[1] and \
+       seq[3] == seq[4] and seq[5] != seq[4]:
+        if seq[3] == seq[4]:
+            return ("Padrão 2x1", seq[5])
+    return None
+
+
+def estrategia_2x2(hist: List[str]) -> Optional[Tuple[str, str]]:
+    if len(hist) < 4:
+        return None
+    a, b, c, d = hist[-4:]
+    if a == b and c == d and a != c:
+        return ("Padrão 2x2", c)
+    return None
+
+
+def estrategia_3x3(hist: List[str]) -> Optional[Tuple[str, str]]:
+    if len(hist) < 6:
+        return None
+    seq = hist[-6:]
+    if seq[0] == seq[1] == seq[2] and seq[3] == seq[4] == seq[5] and seq[0] != seq[3]:
+        return ("Padrão 3x3", seq[3])
+    return None
+
+
+def estrategia_maioria(hist: List[str]) -> Optional[Tuple[str, str]]:
+    if len(hist) < 6:
+        return None
+    window = hist[-6:]
+    cnt = Counter(window)
+    if cnt["🔵"] >= 4:
+        return ("Maioria Azul", "🔵")
+    if cnt["🔴"] >= 4:
+        return ("Maioria Vermelho", "🔴")
+    return None
+
+
+def estrategia_markov(hist: List[str], order: int = 2) -> Optional[Tuple[str, str]]:
+    """
+    Modelo de Markov simples de ordem 2:
+    Procura a sequência dos últimos 'order' resultados e vê qual cor veio mais vezes depois dela.
+    """
+    if len(hist) < order + 1:
+        return None
+
+    # Construir tabela de transições (só considera 🔵 e 🔴, ignora 🟡 para simplificar)
+    transitions = defaultdict(Counter)
+    for i in range(order, len(hist)):
+        prev = tuple(hist[i - order:i])
+        next_color = hist[i]
+        if next_color in ("🔵", "🔴"):
+            transitions[prev][next_color] += 1
+
+    # Sequência atual
+    current_seq = tuple(hist[-order:])
+
+    if current_seq not in transitions or sum(transitions[current_seq].values()) == 0:
+        return None
+
+    # Cor mais frequente após essa sequência
+    most_common = transitions[current_seq].most_common(1)
+    if not most_common:
+        return None
+
+    predicted_color, count = most_common[0]
+    nome = f"Markov ordem {order} ({''.join(current_seq)} → {predicted_color})"
+
+    return (nome, predicted_color)
+
+
+# ─── MOTOR DE DECISÃO (VOTAÇÃO) ───
+def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=None) -> Tuple[Optional[str], Optional[str]]:
+
+    if len(history) < 4:
         return None, None
-    res = estrategia_maioria_recente(history)
-    if res:
-        return res
+
     votos = {"🔵": 0.0, "🔴": 0.0}
-    melhor_nome = None
-    for func, peso in [
-        (estrategia_repeticao, 2.5),
-        (estrategia_alternancia, 2.0),
-    ]:
+    nome = None
+
+    estrategias = [
+        (estrategia_tendencia,        3.0),
+        (estrategia_quebra_sequencia, 3.0),
+        (estrategia_2x1,              2.5),
+        (estrategia_2x2,              2.5),
+        (estrategia_3x3,              2.5),
+        (estrategia_alternancia,      2.0),
+        (estrategia_maioria,          2.0),
+        (estrategia_markov,           2.0),   # ← Nova estratégia Markov adicionada
+    ]
+
+    for func, peso in estrategias:
         res = func(history)
         if res:
-            nome, cor = res
+            n, cor = res
             votos[cor] += peso
-            if melhor_nome is None:
-                melhor_nome = nome
-    res_par = estrategia_paridade(player_score, banker_score)
-    if res_par:
-        nome_par, cor_par = res_par
-        votos[cor_par] += 1.5
-        if melhor_nome is None:
-            melhor_nome = nome_par
-    total = votos["🔵"] + votos["🔴"]
-    diff = abs(votos["🔵"] - votos["🔴"])
-    if total >= 2.0 and diff >= 0.8:
-        cor = "🔵" if votos["🔵"] > votos["🔴"] else "🔴"
-        nome = melhor_nome or "Sinal Rápido"
-        return (nome, cor)
-    return None, None
+            if nome is None:
+                nome = n   # mantém o primeiro nome que ativou (podes mudar para o de maior peso se preferires)
+
+    if votos["🔵"] == 0 and votos["🔴"] == 0:
+        return None, None
+
+    cor_final = "🔵" if votos["🔵"] > votos["🔴"] else "🔴"
+
+    return nome or "Estratégia VIP + Markov", cor_final
+
 
 # ─── MENSAGEM DE SINAL ───
 def main_entry_text(color: str) -> str:
@@ -387,7 +456,7 @@ async def try_send_signal():
         return
     if now < state["signal_cooldown_until"]:
         return
-    if len(state["history"]) < 3:
+    if len(state["history"]) < 4:
         return
     padrao, cor = gerar_sinal_estrategia(
         state["history"],
