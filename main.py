@@ -22,9 +22,7 @@ HEADERS = {
     'Accept': 'application/json',
     'Accept-Language': 'en-US,en;q=0.9',
 }
-
 ANGOLA_TZ = pytz.timezone('Africa/Luanda')
-
 OUTCOME_MAP = {
     "PlayerWon": "🔵",
     "BankerWon": "🔴",
@@ -107,6 +105,18 @@ def load_state():
         logger.info("Nenhum estado anterior encontrado, começando do zero.")
     except Exception as e:
         logger.debug(f"Erro ao carregar estado: {e}")
+
+def check_reset_placar():
+    """Zera o placar quando total de greens atingir 500."""
+    if state["total_greens"] >= 500:
+        state["total_greens"] = 0
+        state["greens_sem_gale"] = 0
+        state["greens_gale_1"] = 0
+        state["total_empates"] = 0
+        state["total_losses"] = 0
+        state["greens_seguidos"] = 0
+        save_state()
+        logger.info("🔄 Placar zerado após 500 greens atingidos")
 
 # ─── TELEGRAM HELPERS ───
 async def send_to_channel(text: str, parse_mode="HTML", disable_preview=True) -> Optional[int]:
@@ -221,7 +231,7 @@ async def update_history_from_api(session) -> bool:
         logger.debug(f"Erro processando API: {e}")
         return False
 
-# ─── ESTRATÉGIAS VIP + MARKOV (do Script 2) ───
+# ─── ESTRATÉGIAS VIP + MARKOV ───
 def oposto(cor: str) -> str:
     return "🔵" if cor == "🔴" else "🔴"
 
@@ -289,10 +299,6 @@ def estrategia_maioria(hist: List[str]) -> Optional[Tuple[str, str]]:
     return None
 
 def estrategia_markov(hist: List[str], order: int = 2) -> Optional[Tuple[str, str]]:
-    """
-    Modelo de Markov simples de ordem 2:
-    Procura a sequência dos últimos 'order' resultados e vê qual cor veio mais vezes depois dela.
-    """
     if len(hist) < order + 1:
         return None
     transitions = defaultdict(Counter)
@@ -315,10 +321,8 @@ def estrategia_markov(hist: List[str], order: int = 2) -> Optional[Tuple[str, st
 def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=None) -> Tuple[Optional[str], Optional[str]]:
     if len(history) < 4:
         return None, None
-
     votos = {"🔵": 0.0, "🔴": 0.0}
     nome = None
-
     estrategias = [
         (estrategia_tendencia,        3.0),
         (estrategia_quebra_sequencia, 3.0),
@@ -329,7 +333,6 @@ def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=N
         (estrategia_maioria,          2.0),
         (estrategia_markov,           2.0),
     ]
-
     for func, peso in estrategias:
         res = func(history)
         if res:
@@ -337,10 +340,8 @@ def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=N
             votos[cor] += peso
             if nome is None:
                 nome = n
-
     if votos["🔵"] == 0 and votos["🔴"] == 0:
         return None, None
-
     cor_final = "🔵" if votos["🔵"] > votos["🔴"] else "🔴"
     return nome or "Estratégia VIP + Markov", cor_final
 
@@ -377,7 +378,6 @@ async def resolve_after_result():
         return
     if state["last_signal_round_id"] and state["last_signal_round_id"] >= state["last_round_id"]:
         return
-
     last_outcome = state["history"][-1]
     state["last_result_round_id"] = state["last_round_id"]
     target = state["last_signal_color"]
@@ -403,6 +403,7 @@ async def resolve_after_result():
             "signal_cooldown_until": datetime.now().timestamp() + 2
         })
         save_state()
+        check_reset_placar()
         return
 
     state["martingale_count"] += 1
@@ -426,6 +427,8 @@ async def resolve_after_result():
             "signal_cooldown_until": datetime.now().timestamp() + 2
         })
         save_state()
+        check_reset_placar()
+
     await refresh_analise_message()
 
 async def try_send_signal():
@@ -437,26 +440,21 @@ async def try_send_signal():
         return
     if len(state["history"]) < 2:
         return
-
     padrao, cor = gerar_sinal_estrategia(
         state["history"],
         state.get("player_score_last"),
         state.get("banker_score_last")
     )
-
     if not cor:
         await refresh_analise_message()
         return
-
     seq = "".join(state["history"][-6:])
     if state["last_signal_pattern"] == padrao and state["last_signal_sequence"] == seq:
         await refresh_analise_message()
         return
-
     await delete_analise_message()
     state["martingale_message_ids"] = []
     msg_id = await send_to_channel(main_entry_text(cor), disable_preview=False)
-
     if msg_id:
         state["entrada_message_id"] = msg_id
         state["waiting_for_result"] = True
