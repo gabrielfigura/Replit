@@ -47,6 +47,7 @@ logger = logging.getLogger("BacBoBot")
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 # ─── STICKERS ───
+
 GREEN_STICKER_ID = "CAACAgEAAxkBAAMEabgkKtcniqUmvsslUXGIxeotNJUAAucFAAKI8vFGUAABY6O9nCdgOgQ"
 LOSS_STICKER_ID = "CAACAgEAAxkBAAMFabgkoGh5GBLnZhz6GZo0quOYvJkAAlIGAAJ8lPBGs1rHcUE1tXQ6BA"
 
@@ -119,13 +120,14 @@ def check_reset_placar():
         logger.info("🔄 Placar zerado após 500 greens atingidos")
 
 # ─── TELEGRAM HELPERS ───
-async def send_to_channel(text: str, parse_mode="HTML", disable_preview=True) -> Optional[int]:
+async def send_to_channel(text: str, parse_mode="HTML", disable_preview=True, reply_to_message_id=None) -> Optional[int]:
     try:
         msg = await bot.send_message(
             chat_id=TELEGRAM_CHANNEL_ID,
             text=text,
             parse_mode=parse_mode,
-            disable_web_page_preview=disable_preview
+            disable_web_page_preview=disable_preview,
+            reply_to_message_id=reply_to_message_id
         )
         return msg.message_id
     except Exception as e:
@@ -231,119 +233,76 @@ async def update_history_from_api(session) -> bool:
         logger.debug(f"Erro processando API: {e}")
         return False
 
-# ─── ESTRATÉGIAS VIP + MARKOV ───
-def oposto(cor: str) -> str:
-    return "🔵" if cor == "🔴" else "🔴"
+# ─── PADRÕES DE SINAL (Longest Match First) ───
+PATTERNS = [
+    {"id": 13, "sequencia": ["🔵", "🔵", "🔵", "🔴", "🔴", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 14, "sequencia": ["🔴", "🔴", "🔴", "🔵", "🔵", "🔴", "🔴"], "sinal": "🔵"},
+    {"id": 72, "sequencia": ["🔴", "🔴", "🔴", "🔴", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 87, "sequencia": ["🔵", "🔵", "🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 21, "sequencia": ["🔵", "🔵", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 22, "sequencia": ["🔴", "🔴", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 17, "sequencia": ["🔴", "🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 18, "sequencia": ["🔵", "🔵", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 23, "sequencia": ["🔵", "🔵", "🔴", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 24, "sequencia": ["🔴", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔵"},
+    {"id": 2, "sequencia": ["🔴", "🔴", "🔴", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 3, "sequencia": ["🔵", "🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 6, "sequencia": ["🔴", "🔴", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 7, "sequencia": ["🔵", "🔵", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 8, "sequencia": ["🔴", "🔵", "🔴", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 9, "sequencia": ["🔵", "🔴", "🔵", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 160, "sequencia": ["🔵", "🔴", "🔵", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 25, "sequencia": ["🔵", "🔵", "🔵", "🔵"], "sinal": "🔵"},
+    {"id": 26, "sequencia": ["🔴", "🔴", "🔴", "🔴"], "sinal": "🔴"},
+    {"id": 19, "sequencia": ["🔴", "🔵", "🔴", "🔴"], "sinal": "🔵"},
+    {"id": 20, "sequencia": ["🔵", "🔴", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 1, "sequencia": ["🔵", "🔴", "🔵", "🔴"], "sinal": "🔵"},
+    {"id": 5, "sequencia": ["🔴", "🔵", "🔴", "🔵"], "sinal": "🔴"},
+    {"id": 4, "sequencia": ["🔴", "🔴", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 249, "sequencia": ["🔴", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 150, "sequencia": ["🔵", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 525, "sequencia": ["🔴", "🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 526, "sequencia": ["🔵", "🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 39, "sequencia": ["🔴", "🟡", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 40, "sequencia": ["🔵", "🟡", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 41, "sequencia": ["🔴", "🔵", "🟡", "🔴"], "sinal": "🔴"},
+    {"id": 42, "sequencia": ["🔵", "🔴", "🟡", "🔵"], "sinal": "🔵"},
+    {"id": 43, "sequencia": ["🔴", "🔴", "🔵", "🟡"], "sinal": "🔴"},
+    {"id": 44, "sequencia": ["🔵", "🔵", "🔴", "🟡"], "sinal": "🔵"},
+    {"id": 31, "sequencia": ["🔴", "🟡", "🔴", "🟡"], "sinal": "🔴"},
+    {"id": 40, "sequencia": ["🟡", "🔴", "🟡", "🔴"], "sinal": "🔵"},
+    {"id": 51, "sequencia": ["🔵", "🟡", "🔵", "🟡"], "sinal": "🔵"},
+    {"id": 63, "sequencia": ["🟡", "🔵", "🟡", "🔵"], "sinal": "🔵"},
+    {"id": 95, "sequencia": ["🟡", "🟡", "🟡", "🟡"], "sinal": "🟡"},
+    {"id": 34, "sequencia": ["🔵", "🔵", "🔵"], "sinal": "🔴"},
+    {"id": 15, "sequencia": ["🔴", "🔴", "🟡"], "sinal": "🔴"},
+    {"id": 16, "sequencia": ["🔵", "🔵", "🟡"], "sinal": "🔵"},
+    {"id": 45, "sequencia": ["🔵", "🟡", "🟡"], "sinal": "🔵"},
+    {"id": 46, "sequencia": ["🔴", "🟡", "🟡"], "sinal": "🔴"},
+    {"id": 420, "sequencia": ["🔴", "🟡", "🔴"], "sinal": "🔴"},
+    {"id": 424, "sequencia": ["🔵", "🟡", "🔵"], "sinal": "🔵"},
+    {"id": 124, "sequencia": ["🔴", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 131, "sequencia": ["🔵", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 142, "sequencia": ["🔵", "🔴", "🔵"], "sinal": "🔵"},
+    {"id": 157, "sequencia": ["🔴", "🔵", "🔴"], "sinal": "🔴"},
+    {"id": 10, "sequencia": ["🔵", "🔴"], "sinal": "🔵"},
+    {"id": 11, "sequencia": ["🔴", "🔵"], "sinal": "🔴"},
+]
 
-def estrategia_tendencia(hist: List[str]) -> Optional[Tuple[str, str]]:
-    if len(hist) < 4:
-        return None
-    last = hist[-4:]
-    cnt = Counter(last)
-    if cnt["🔵"] >= 3:
-        return ("Tendência Azul", "🔵")
-    if cnt["🔴"] >= 3:
-        return ("Tendência Vermelho", "🔴")
-    return None
+# Pré-ordenar: padrão mais longo primeiro, depois ID maior em caso de empate
+PATTERNS.sort(key=lambda p: (-len(p["sequencia"]), -p["id"]))
 
-def estrategia_quebra_sequencia(hist: List[str]) -> Optional[Tuple[str, str]]:
-    if len(hist) < 4:
-        return None
-    if hist[-1] == hist[-2] == hist[-3] == hist[-4]:
-        return ("Quebra 4x", oposto(hist[-1]))
-    return None
-
-def estrategia_alternancia(hist: List[str]) -> Optional[Tuple[str, str]]:
-    if len(hist) < 4:
-        return None
-    a, b, c, d = hist[-4:]
-    if a == c and b == d and a != b:
-        return ("Alternância ABAB", oposto(d))
-    return None
-
-def estrategia_2x1(hist: List[str]) -> Optional[Tuple[str, str]]:
-    if len(hist) < 6:
-        return None
-    seq = hist[-6:]
-    if seq[0] == seq[1] and seq[2] != seq[1] and \
-       seq[3] == seq[4] and seq[5] != seq[4]:
-        if seq[3] == seq[4]:
-            return ("Padrão 2x1", seq[5])
-    return None
-
-def estrategia_2x2(hist: List[str]) -> Optional[Tuple[str, str]]:
-    if len(hist) < 4:
-        return None
-    a, b, c, d = hist[-4:]
-    if a == b and c == d and a != c:
-        return ("Padrão 2x2", c)
-    return None
-
-def estrategia_3x3(hist: List[str]) -> Optional[Tuple[str, str]]:
-    if len(hist) < 6:
-        return None
-    seq = hist[-6:]
-    if seq[0] == seq[1] == seq[2] and seq[3] == seq[4] == seq[5] and seq[0] != seq[3]:
-        return ("Padrão 3x3", seq[3])
-    return None
-
-def estrategia_maioria(hist: List[str]) -> Optional[Tuple[str, str]]:
-    if len(hist) < 6:
-        return None
-    window = hist[-6:]
-    cnt = Counter(window)
-    if cnt["🔵"] >= 4:
-        return ("Maioria Azul", "🔵")
-    if cnt["🔴"] >= 4:
-        return ("Maioria Vermelho", "🔴")
-    return None
-
-def estrategia_markov(hist: List[str], order: int = 2) -> Optional[Tuple[str, str]]:
-    if len(hist) < order + 1:
-        return None
-    transitions = defaultdict(Counter)
-    for i in range(order, len(hist)):
-        prev = tuple(hist[i - order:i])
-        next_color = hist[i]
-        if next_color in ("🔵", "🔴"):
-            transitions[prev][next_color] += 1
-    current_seq = tuple(hist[-order:])
-    if current_seq not in transitions or sum(transitions[current_seq].values()) == 0:
-        return None
-    most_common = transitions[current_seq].most_common(1)
-    if not most_common:
-        return None
-    predicted_color, count = most_common[0]
-    nome = f"Markov ordem {order} ({''.join(current_seq)} → {predicted_color})"
-    return (nome, predicted_color)
-
-# ─── MOTOR DE DECISÃO (VOTAÇÃO) ───
+# ─── MOTOR DE DECISÃO (PATTERN MATCHING) ───
 def gerar_sinal_estrategia(history: List[str], player_score=None, banker_score=None) -> Tuple[Optional[str], Optional[str]]:
-    if len(history) < 4:
+    if len(history) < 2:
         return None, None
-    votos = {"🔵": 0.0, "🔴": 0.0}
-    nome = None
-    estrategias = [
-        (estrategia_tendencia,        3.0),
-        (estrategia_quebra_sequencia, 3.0),
-        (estrategia_2x1,              2.5),
-        (estrategia_2x2,              2.5),
-        (estrategia_3x3,              2.5),
-        (estrategia_alternancia,      2.0),
-        (estrategia_maioria,          2.0),
-        (estrategia_markov,           2.0),
-    ]
-    for func, peso in estrategias:
-        res = func(history)
-        if res:
-            n, cor = res
-            votos[cor] += peso
-            if nome is None:
-                nome = n
-    if votos["🔵"] == 0 and votos["🔴"] == 0:
-        return None, None
-    cor_final = "🔵" if votos["🔵"] > votos["🔴"] else "🔴"
-    return nome or "Estratégia VIP + Markov", cor_final
+    for pattern in PATTERNS:
+        seq = pattern["sequencia"]
+        seq_len = len(seq)
+        if len(history) >= seq_len and history[-seq_len:] == seq:
+            nome = f"Padrão #{pattern['id']} ({''.join(seq)})"
+            return nome, pattern["sinal"]
+    return None, None
 
 # ─── MENSAGEM DE SINAL ───
 def main_entry_text(color: str) -> str:
@@ -354,12 +313,10 @@ def main_entry_text(color: str) -> str:
         f"♻️ | Fazer máximo G1\n"
         f"💻 | Abra o jogo pelo link abaixo ⤵️\n"
         f"\n"
-        f'<a href="https://btt-pt.hopghpfa.com/pt/casino?partner=p8506p33116p4649#registration-bonus">👉 Regista-te aqui: BETILT</a>'
+        f'<a href="https://btt-pt.hopghpfa.com/pt/casino?partner=p8506p33116p4649#registration-bonus">👉Regista-te aqui: BETILT</a>'
     )
 
 async def send_gale_warning(level: int):
-    if level != 1:
-        return
     text = f"🔄 <b>GALE {level}</b> 🔄\nContinuar na mesma cor!"
     msg_id = await send_to_channel(text)
     if msg_id:
@@ -368,6 +325,18 @@ async def send_gale_warning(level: int):
 async def clear_gale_messages():
     await delete_messages(state["martingale_message_ids"])
     state["martingale_message_ids"] = []
+
+def _reset_signal_state():
+    state.update({
+        "waiting_for_result": False,
+        "last_signal_color": None,
+        "martingale_count": 0,
+        "entrada_message_id": None,
+        "last_signal_pattern": None,
+        "last_signal_sequence": None,
+        "last_signal_round_id": None,
+        "signal_cooldown_until": datetime.now().timestamp() + 2
+    })
 
 async def resolve_after_result():
     if not state.get("waiting_for_result") or not state.get("last_signal_color"):
@@ -385,50 +354,41 @@ async def resolve_after_result():
     is_tie = last_outcome == "🟡"
 
     if acertou or is_tie:
+        # ─── ACERTO ───
         state["total_greens"] += 1
         state["greens_seguidos"] += 1
-        if state["martingale_count"] == 0: state["greens_sem_gale"] += 1
-        elif state["martingale_count"] == 1: state["greens_gale_1"] += 1
+        gale = state["martingale_count"]
+        if gale == 0:
+            state["greens_sem_gale"] += 1
+        else:
+            state["greens_gale_1"] += 1
+
+        # 1) Sticker de acerto
         await send_sticker_to_channel(GREEN_STICKER_ID)
+        # 2) Placar com sequência de greens
         await send_to_channel(format_placar())
         await clear_gale_messages()
-        state.update({
-            "waiting_for_result": False,
-            "last_signal_color": None,
-            "martingale_count": 0,
-            "entrada_message_id": None,
-            "last_signal_pattern": None,
-            "last_signal_sequence": None,
-            "last_signal_round_id": None,
-            "signal_cooldown_until": datetime.now().timestamp() + 2
-        })
+        _reset_signal_state()
         save_state()
         check_reset_placar()
         return
 
+    # ─── ERROU ───
     state["martingale_count"] += 1
     if state["martingale_count"] == 1:
+        # Primeiro e único gale
         await send_gale_warning(1)
+        return
 
-    if state["martingale_count"] >= 2:
-        state["greens_seguidos"] = 0
-        state["total_losses"] += 1
-        await send_sticker_to_channel(LOSS_STICKER_ID)
-        await send_to_channel(format_placar())
-        await clear_gale_messages()
-        state.update({
-            "waiting_for_result": False,
-            "last_signal_color": None,
-            "martingale_count": 0,
-            "entrada_message_id": None,
-            "last_signal_pattern": None,
-            "last_signal_sequence": None,
-            "last_signal_round_id": None,
-            "signal_cooldown_until": datetime.now().timestamp() + 2
-        })
-        save_state()
-        check_reset_placar()
-
+    # Já passou do gale 1 (martingale_count >= 2) → LOSS
+    state["greens_seguidos"] = 0
+    state["total_losses"] += 1
+    await send_sticker_to_channel(LOSS_STICKER_ID)
+    await send_to_channel(format_placar())
+    await clear_gale_messages()
+    _reset_signal_state()
+    save_state()
+    check_reset_placar()
     await refresh_analise_message()
 
 async def try_send_signal():
@@ -448,7 +408,7 @@ async def try_send_signal():
     if not cor:
         await refresh_analise_message()
         return
-    seq = "".join(state["history"][-6:])
+    seq = "".join(state["history"][-7:])
     if state["last_signal_pattern"] == padrao and state["last_signal_sequence"] == seq:
         await refresh_analise_message()
         return
